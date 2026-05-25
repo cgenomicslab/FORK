@@ -1,4 +1,4 @@
-`# API Reference Guide
+# API Reference Guide
 
 This document provides complete documentation for the backend retrieval tools, visualization scripts, and command-line pipelines of the **UniProt Lab Manager**.
 
@@ -21,11 +21,21 @@ The script serves two purposes simultaneously:
 
 ### Requirements
 
+**Option 1**: Setting up the Conda environment from the uniprot-lab-manager.yml -- Needed if planning to run Streamlit UI tool.
+
+```bash
+conda env create -f uniprot-lab-manager.yml
+conda activate bio_tools
+```
+
+**Option 2**: If you only want to use the get_reference_uniprot_set_lib.py script as a Python library in your own project or as a command-line tool, you can skip the heavy Conda environment and install only the minimal requirements via pip:
+
+
 #### Python Libraries
 
 - `mysql-connector-python`
 - `python-dotenv`
-- `biopython` *(optional — required only for `to_biopython()`)*
+- `biopython`*
 
 ```bash
 pip install mysql-connector-python python-dotenv biopython
