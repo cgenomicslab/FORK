@@ -52,17 +52,26 @@ uniprot-lab-manager/
 
 ## Quickstart
 
-### 1. Prerequisites
+### 1. Prerequisites — Database Setup
 
-- Python 3.11+ (conda environment recommended)
-- MySQL server with the local UniProt DB already set up (see `setup/`)
-- External tools in PATH: `mafft`, `fasttree` (and optionally `trimal`, `iqtree`, `clustalo`)
+This tool requires a local UniProt Reference Proteomes MySQL database.
+
+Build it first using the companion repository:
+→ https://github.com/athenamarou/Ref_Proteomes_Local_DB
+
+Run these two steps in order:
+1. `uniprot_sync_v7.py` — builds the database
+2. `pyhmmer_hmmsearch.py` — populates HMM search results
+
+Once the database is running, proceed with the steps below to launch the GUI.
 
 ### 2. Install dependencies
 
+We recommend using Conda to ensure all biological binaries (like MAFFT and FastTree) are installed correctly alongside Python.
+
 ```bash
+conda env create -f uniprot-lab-manager.yml
 conda activate bio_tools
-pip install -r requirements.txt
 ```
 
 ### 3. Configure database connection
@@ -190,6 +199,12 @@ numpy
 ```
 
 ---
+
+## For Developers: Python API & CLI
+
+Want to use our retrieval backend in your own Python scripts or Jupyter notebooks? You can import `get_reference_uniprot_set_lib.py` as a standalone library to fetch BioPython `SeqRecord` objects or generate FASTA strings programmatically.
+
+**[Read the API Reference & CLI Guide here](API_REFERENCE.md)**
 
 ## Notes
 
