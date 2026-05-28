@@ -433,14 +433,14 @@ class UniProtRetriever:
                     AND  h.version   = p.version
                     WHERE h.version = %s
                     {'AND h.full_evalue <= %s' if evalue_cutoff is not None else ''}
-                    AND h.accession IN ({placeholders})
+                    AND (h.accession IN ({placeholders}) OR p.name IN ({placeholders}))
                     ORDER BY h.accession, h.ali_from
                 """
 
                 params = [version]
                 if evalue_cutoff is not None:
                     params.append(evalue_cutoff)
-                params += chunk
+                params += chunk + chunk
 
                 self.cursor.execute(query, tuple(params))
                 all_results.extend(self.cursor.fetchall())
@@ -941,10 +941,10 @@ class UniProtRetriever:
                     FROM   proteins  p
                     JOIN   sequences s ON p.seq_id = s.seq_id
                     WHERE  p.version = %s
-                      AND  p.accession IN ({placeholders})
+                      AND  (p.accession IN ({placeholders}) OR p.name IN ({placeholders}))
                 """
 
-                params = [version] + chunk
+                params = [version] + chunk + chunk
                 self.cursor.execute(query, tuple(params))
                 all_results.extend(self.cursor.fetchall())
         except mysql.connector.Error as err:
