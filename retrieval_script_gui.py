@@ -21,7 +21,13 @@ with st.sidebar.expander("DB Config"):
     db_name = st.text_input("Database", value=default_config["database"])
     config = uni.get_db_config(host=host, user=user, database=db_name)
 
-# --- MAIN NAVIGATION ---
+# ==========================================================================================================
+
+#                                               MAIN NAVIGATION
+
+# ==========================================================================================================
+
+
 menu = [
     "Standard Retrieval",
     "HMM Search",
@@ -33,6 +39,14 @@ menu = [
     "Presence/Absence & Drill-down",
 ]
 choice = st.selectbox("Select Functionality", menu)
+
+
+
+# ==========================================================================================================
+
+#                                               STANDARD RETRIEVAL TAB
+
+# ==========================================================================================================
 
 if choice == "Standard Retrieval":
     st.header("Filtered Sequence Retrieval")
@@ -61,6 +75,13 @@ if choice == "Standard Retrieval":
             )
         else:
             st.warning("No records found.")
+
+
+# ==========================================================================================================
+
+#                                               HMM SEARCH TAB
+
+# ==========================================================================================================
 
 elif choice == "HMM Search":
     st.header("HMM Hit Retrieval")
@@ -91,6 +112,13 @@ elif choice == "HMM Search":
         else:
             st.warning("No records found.")
 
+
+# ==========================================================================================================
+
+#                                               ACCESSION LOOKUP TAB
+
+# ==========================================================================================================
+
 elif choice == "Accession Lookup":
     st.header("Batch Accession Retrieval")
     ver = st.text_input("UniProt Version", value="2026_01")
@@ -108,6 +136,12 @@ elif choice == "Accession Lookup":
             )
         else:
             st.warning("No records found.")
+
+# ==========================================================================================================
+
+#                                              DOMAIN COORDINATES LOOKUP TAB
+
+# ==========================================================================================================
 
 elif choice == "Domain Coordinate Lookup":
     st.header("Protein Domain Architecture")
@@ -151,7 +185,7 @@ elif choice == "Domain Coordinate Lookup":
         st.download_button(
             "Download CSV", df.to_csv(index=False), "domains.csv", key="dc_csv_dl"
         )
-        # --------- Domain Coordinate Lookup tab ---------
+
         # ──----------------- Architecture diagram ────────────────────────────────────
         # The domain records already in memory are passed directly to
         # viz_utils — no additional DB call needed.
@@ -185,12 +219,24 @@ elif choice == "Domain Coordinate Lookup":
             )
 
 
+# ==========================================================================================================
+
+#                                               DATABASE INFO TAB
+
+# ==========================================================================================================
 elif choice == "Database Info":
     st.header("Database Status")
     if st.button("List Versions & Stats"):
         with uni.UniProtRetriever(config) as db:
             versions = db.list_available_versions()
             st.table(versions)
+            
+
+# ==========================================================================================================
+
+#                                              PHYLOGENETIC TREE TAB
+
+# ==========================================================================================================
 
 elif choice == "Phylogenetic Tree":
     st.header("Phylogenetic Tree Builder")
@@ -217,7 +263,7 @@ elif choice == "Phylogenetic Tree":
         )
         no_ncbi = st.checkbox("Skip NCBI annotation (faster)", value=True)
 
-        # New Toggle for ETE4 Server
+        # ETE4 Server
         use_ete4 = st.checkbox(
             "Start ETE4 Interactive Server (Alternative Viewer)", value=False
         )
@@ -262,7 +308,7 @@ elif choice == "Phylogenetic Tree":
                 ):
 
                     # 1. Automatically kill any old zombie server holding this port
-                    # (This uses standard Linux commands to free the port)
+
                     os.system(f"fuser -k {ete4_port}/tcp >/dev/null 2>&1")
 
                     # 2. Start the pipeline in the background
@@ -402,6 +448,12 @@ elif choice == "Phylogenetic Tree":
         st.success("Done! Upload the .nwk file to https://itol.embl.de")
 
 
+# ==========================================================================================================
+
+#                                          GO -> DOMAIN PROFILES TAB
+
+# ==========================================================================================================
+
 elif choice == "GO → Domain Profiles":
     st.header("GO Term → HMM Domain Profiles")
     ver = st.text_input("UniProt Version", value="2026_01")
@@ -427,6 +479,12 @@ elif choice == "GO → Domain Profiles":
         else:
             st.warning("No domain profiles found for this GO term.")
 
+
+# ==========================================================================================================
+
+#                                       PRESENCE ABSENCE & DRILL DOWN TAB
+
+# ==========================================================================================================
 
 elif choice == "Presence/Absence & Drill-down":
     st.header("Presence / Absence Matrix + Functional Drill-down")
@@ -485,7 +543,7 @@ elif choice == "Presence/Absence & Drill-down":
         )
 
     # -----------------------------------------------------------------
-    # Build Matrix button
+    #                       Build Matrix button
     # -----------------------------------------------------------------
     # When clicked, we run the matrix query and store the result in
     # session_state so it survives subsequent interactions (drill-down
@@ -551,7 +609,7 @@ elif choice == "Presence/Absence & Drill-down":
                 lambda r: taxon_label(r["taxon_id"], r.get("scientific_name")), axis=1
             )
 
-            # ── Pivot into matrix form ───────────────────────────────
+            # ─────────────────── Pivot into matrix  ───────────────────────────────
             # Rows = organisms, columns = HMM profiles, values = protein counts.
             # fill_value=0 makes absent (taxon, profile) pairs explicit zeros
             # rather than NaN — important for the color gradient.
@@ -565,7 +623,7 @@ elif choice == "Presence/Absence & Drill-down":
             matrix_df.index.name = "Organism (taxon_id · name)"
             matrix_df.columns.name = None
 
-            # ── Color the matrix ────────────────────────────────────
+            # ───────────────────── Color the matrix ────────────────────────────────────
             # background_gradient applies a colour scale across the
             # entire table (axis=None), so we compare all cells together.
             # Zeros stay near-white; high counts go dark orange/red.
@@ -592,7 +650,7 @@ elif choice == "Presence/Absence & Drill-down":
             # The clustermap below reorders rows and columns by similarity,
             #  useful when you have many organisms/profiles and
             # want to see which groups of organisms share a profile complement.
-            # We offer it as an on-demand button (not automatic) because
+            # on-demand button (not automatic) because
             # seaborn clustermap takes a moment on large matrices and we
             # don't want it blocking the page on every rerun.
             if matrix_df.shape[0] >= 2 and matrix_df.shape[1] >= 1:
@@ -620,9 +678,6 @@ elif choice == "Presence/Absence & Drill-down":
             # Two selectboxes (taxon + profile) populated from
             # the matrix. The user picks the cell they want to investigate,
             # then clicks "Drill Down".
-            #
-            # We build the options from df_flat, not from matrix_df, because
-            # df_flat has the taxon_id integers we need for the DB query.
             # =============================================================
             st.markdown("---")
             st.subheader("Step 2 — Drill Down into a Cell")
@@ -676,9 +731,7 @@ elif choice == "Presence/Absence & Drill-down":
                     with st.spinner("Fetching accessions and computing drill-down..."):
 
                         # ── Bridge query: get accessions for this cell ──
-                        # This is the get_accessions_for_cell() call.
-                        # We get the list of proteins, then extract just
-                        # the accession strings for the two step-2 methods.
+           
                         cell_records = uni.fetch_accessions_for_cell(
                             pa_ver,
                             selected_profile,
@@ -688,12 +741,9 @@ elif choice == "Presence/Absence & Drill-down":
                         )
                         accessions = [r["accession"] for r in cell_records]
 
-                        # ── Path A: sub-profile hits ────────────────────
+                        # ───────────────── Path A: sub-profile hits ────────────────────
                         # We exclude the original query profile from the
-                        # results so it doesn't dominate the view — the
-                        # user already knows it's there (that's why they
-                        # clicked the cell). The interesting signal is
-                        # what else these proteins carry.
+                        # results so it doesn't dominate the view 
                         subprofile_rows = uni.fetch_subprofile_hits(
                             pa_ver,
                             accessions,
@@ -702,7 +752,7 @@ elif choice == "Presence/Absence & Drill-down":
                             db_config=config,
                         )
 
-                        # ── Path B: domain architectures ────────────────
+                        # ───────────────────Path B: domain architectures ────────────────
                         arch_rows = uni.fetch_domain_architectures(
                             pa_ver,
                             accessions,
@@ -725,7 +775,7 @@ elif choice == "Presence/Absence & Drill-down":
     # =================================================================
     # SECTION 4 — Display drill-down results (if they exist)
     # =================================================================
-    # Again we read from session_state, not local variables, so the
+    # Again read from session_state, not local variables, so the
     # results stay visible even if the user later changes a selectbox
     # without clicking "Drill Down" again.
     # =================================================================
@@ -746,7 +796,7 @@ elif choice == "Presence/Absence & Drill-down":
             ]
         )
 
-        # ── Tab A: sub-profile enrichment ───────────────────────────────
+        # ───────────────────── Tab A: sub-profile enrichment ───────────────────────────────
         with tab_a:
             st.caption(
                 "All HMM profiles found on these proteins, ranked by how many "
@@ -788,7 +838,7 @@ elif choice == "Presence/Absence & Drill-down":
             else:
                 st.info("No additional profiles found on these proteins.")
 
-        # ── Tab B: domain architectures ─────────────────────────────────
+        # ───────────────────── Tab B: domain architectures ─────────────────────────────────
         with tab_b:
             st.caption(
                 "Domain architecture patterns across these proteins, ranked by "
@@ -828,9 +878,9 @@ elif choice == "Presence/Absence & Drill-down":
                     file_name=f"architectures_{ctx['profile']}_{ctx['taxon_label'].split(' ')[0]}.csv",
                 )
 
-                # ── Architecture diagram for a selected pattern ─────────────
+                # ───────────────────── Architecture diagram for a selected pattern ─────────────
             # Tab B already shows a ranked table of architecture patterns.
-            # Here we let the user pick one pattern and visualize the
+            # Functionality for the user to pick one pattern and visualize the
             # example proteins from that pattern as a domain diagram.
             # We can only draw proteins for which we have domain records,
             # so we do a small targeted DB call using the example_accessions
