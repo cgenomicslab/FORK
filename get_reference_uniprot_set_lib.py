@@ -40,6 +40,7 @@ import argparse
 import os
 import sys
 from dotenv import load_dotenv
+import getpass
 
 load_dotenv()
 
@@ -1403,13 +1404,30 @@ def _build_parser():
         metavar="GO_ID",
         help="Get all HMM Profiles found in proteins annotated with a GO term",
     )
+    
+    # Direct credentials (alternative to .env)
+    parser.add_argument("--host",     default=None, help="Database host (overrides .env / default)")
+    parser.add_argument("--user",     default=None, help="Database user (overrides .env / default)")
+    parser.add_argument("--password", default=None, help="Database password (overrides .env / default)")
+    parser.add_argument("--database", default=None, help="Database name (overrides .env / default)")
+    
     return parser
 
 
+
+        
 def main():
     args = _build_parser().parse_args()
+    
+    if args.user and args.password is None:
+        args.password = getpass.getpass(prompt=f"Password for {args.user}@{args.host or 'localhost'}: ")
 
-    retriever = UniProtRetriever(get_db_config())
+    retriever = UniProtRetriever(get_db_config(
+    host=args.host,
+    user=args.user,
+    password=args.password,
+    database=args.database,
+    ))
 
     try:
         retriever.connect()
