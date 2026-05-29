@@ -3,7 +3,6 @@ import get_reference_uniprot_set_lib as uni
 import subprocess
 import pandas as pd
 import os
-import re
 
 import viz_utils as viz
 import streamlit.components.v1 as components
