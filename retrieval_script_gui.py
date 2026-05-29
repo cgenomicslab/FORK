@@ -3,6 +3,7 @@ import get_reference_uniprot_set_lib as uni
 import subprocess
 import pandas as pd
 import os
+import re
 
 import viz_utils as viz
 import streamlit.components.v1 as components
@@ -54,13 +55,14 @@ if choice == "Standard Retrieval":
     with col1:
         ver = st.text_input("UniProt Version", value="2026_01")
         tax = st.text_input("Taxonomy IDs (comma separated, e.g. 9606, 10090)")
+        tax_file = st.file_uploader("Or upload txt (one ID per line)", type=["txt"], key="sr_tax_file")
     with col2:
         proteome = st.text_input("Proteome ID (Optional)")
         go_id = st.text_input("GO ID (Optional)")
         pfam_id = st.text_input("Pfam ID (Optional)")
 
     if st.button("Fetch Sequences"):
-        tax_ids = [int(t.strip()) for t in tax.split(",")] if tax else None
+        tax_ids = [int(l.strip()) for l in tax_file.read().decode().splitlines() if l.strip()] if tax_file else ([int(t.strip()) for t in tax.split(",") if t.strip()] if tax else None)
         records = uni.fetch_sequences(
             ver, tax_ids, proteome, go_id, pfam_id, db_config=config
         )
@@ -94,9 +96,10 @@ elif choice == "HMM Search":
         else None
     )
     tax = st.text_input("Taxonomy Filter (Optional, comma separated)")
+    tax_file = st.file_uploader("Or upload TXT (one ID per line)", type=["txt"], key="hmm_tax_file")
 
     if st.button("Run HMM Search"):
-        tax_ids = [int(t.strip()) for t in tax.split(",")] if tax else None
+        tax_ids = [int(l.strip()) for l in tax_file.read().decode().splitlines() if l.strip()] if tax_file else ([int(t.strip()) for t in tax.split(",") if t.strip()] if tax else None)
         records = uni.fetch_sequences_by_hmm_hit(
             ver, hmm_query, eval_cutoff, tax_ids, db_config=config
         )
@@ -120,9 +123,9 @@ elif choice == "HMM Search":
 # ==========================================================================================================
 
 elif choice == "Accession Lookup":
-    st.header("Batch Accession Retrieval")
+    st.header("Batch Accession or Protein name Retrieval")
     ver = st.text_input("UniProt Version", value="2026_01")
-    acc_input = st.text_area("Paste Accessions (one per line or space separated)")
+    acc_input = st.text_area("Paste Accessions or Protein names (one per line or space separated)")
 
     if st.button("Get Sequences"):
         acc_list = acc_input.replace(",", " ").split()
@@ -146,7 +149,7 @@ elif choice == "Accession Lookup":
 elif choice == "Domain Coordinate Lookup":
     st.header("Protein Domain Architecture")
     ver = st.text_input("UniProt Version", value="2026_01")
-    acc_input = st.text_area("Enter Accessions")
+    acc_input = st.text_area("Enter Accessions or Protein names")
     use_evalue = st.checkbox("Apply E-value cutoff")
     eval_cutoff = (
         st.number_input("E-value Cutoff", value=1e-5, format="%.1e")
@@ -248,8 +251,11 @@ elif choice == "Phylogenetic Tree":
             placeholder="e.g. Homeodomain, PF00001,PF00002",
         )
         tax = st.text_input("Taxonomy IDs (comma separated, optional)")
+        tax_file = st.file_uploader("Or upload txt (one ID per line)", type=["txt"], key="tree_tax_file")
         exclude_tax = st.text_input("Exclude Taxonomy IDs (comma separated, optional)")
+        exclude_tax_file = st.file_uploader("Or upload exclude txt", type=["txt"], key="tree_excl_file")
         prefix = st.text_input("Output Prefix", placeholder="e.g. myrun")
+        output_dir = st.text_input("Output Directory", placeholder="e.g. /home/user/results (leave empty for current dir)")
 
     with col2:
         aln = st.selectbox("Alignment Tool", ["mafft", "einsi", "clustalo"])
@@ -290,11 +296,32 @@ elif choice == "Phylogenetic Tree":
                 ml,
                 "--cpu",
                 cpu,
+                
             ]
-            if tax:
-                cmd += ["--taxids", tax.replace(" ", "")]
-            if exclude_tax:
-                cmd += ["--exclude_taxids", exclude_tax.replace(" ", "")]
+            
+            if output_dir:
+                cmd += ["--output_dir", output_dir.strip()]
+                
+            # tax
+            if tax_file:
+                tax_str = ",".join(l.strip() for l in tax_file.read().decode().splitlines() if l.strip())
+            elif tax:
+                tax_str = tax.replace(" ", "")
+            else:
+                tax_str = None
+            if tax_str:
+                cmd += ["--taxids", tax_str]
+
+            # exclude_tax
+            if exclude_tax_file:
+                excl_str = ",".join(l.strip() for l in exclude_tax_file.read().decode().splitlines() if l.strip())
+            elif exclude_tax:
+                excl_str = exclude_tax.replace(" ", "")
+            else:
+                excl_str = None
+            if excl_str:
+                cmd += ["--exclude_taxids", excl_str]
+                
             if evalue is not None:
                 cmd += ["--evalue", str(evalue)]
             if no_ncbi:
@@ -379,7 +406,6 @@ elif choice == "Phylogenetic Tree":
             st.subheader("ETE4 Interactive Explorer")
             port = st.session_state["ete4_port"]
             st.caption(f"Connected to ETE4 server on port {port}")
-            # Fix: Point the iframe to the actual server IP, not localhost!
             components.iframe(
                 f"http://localhost:{port}", width=1200, height=800, scrolling=True
             )
@@ -531,6 +557,7 @@ elif choice == "Presence/Absence & Drill-down":
             placeholder="e.g. 9606, 10090, 7227",
             key="pa_tax_input",
         )
+        pa_tax_file = st.file_uploader("Or upload TXT (one ID per line)", type=["txt"], key="pa_tax_file")
 
     with col2:
         pa_use_evalue = st.checkbox("Apply E-value cutoff", key="pa_use_evalue")
@@ -554,11 +581,13 @@ elif choice == "Presence/Absence & Drill-down":
             st.warning("Please enter at least one Pfam name or accession.")
         else:
             pfam_queries = [q.strip() for q in pa_pfam_input.split(",") if q.strip()]
-            tax_ids = (
-                [int(t.strip()) for t in pa_tax_input.split(",") if t.strip()]
-                if pa_tax_input.strip()
-                else None
-            )
+            if pa_tax_file:
+                tax_ids = [int(l.strip()) for l in pa_tax_file.read().decode().splitlines() if l.strip()]
+            elif pa_tax_input.strip():
+                tax_ids = [int(t.strip()) for t in pa_tax_input.split(",") if t.strip()]
+            else:
+                tax_ids = None
+
 
             with st.spinner("Querying database..."):
                 rows = uni.fetch_presence_absence_matrix(
