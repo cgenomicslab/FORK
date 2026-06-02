@@ -40,6 +40,7 @@ import argparse
 import os
 import sys
 from dotenv import load_dotenv
+import getpass
 
 load_dotenv()
 
@@ -433,14 +434,14 @@ class UniProtRetriever:
                     AND  h.version   = p.version
                     WHERE h.version = %s
                     {'AND h.full_evalue <= %s' if evalue_cutoff is not None else ''}
-                    AND h.accession IN ({placeholders})
+                    AND (h.accession IN ({placeholders}) OR p.name IN ({placeholders}))
                     ORDER BY h.accession, h.ali_from
                 """
 
                 params = [version]
                 if evalue_cutoff is not None:
                     params.append(evalue_cutoff)
-                params += chunk
+                params += chunk + chunk
 
                 self.cursor.execute(query, tuple(params))
                 all_results.extend(self.cursor.fetchall())
@@ -941,10 +942,10 @@ class UniProtRetriever:
                     FROM   proteins  p
                     JOIN   sequences s ON p.seq_id = s.seq_id
                     WHERE  p.version = %s
-                      AND  p.accession IN ({placeholders})
+                      AND  (p.accession IN ({placeholders}) OR p.name IN ({placeholders}))
                 """
 
-                params = [version] + chunk
+                params = [version] + chunk + chunk
                 self.cursor.execute(query, tuple(params))
                 all_results.extend(self.cursor.fetchall())
         except mysql.connector.Error as err:
@@ -1403,13 +1404,30 @@ def _build_parser():
         metavar="GO_ID",
         help="Get all HMM Profiles found in proteins annotated with a GO term",
     )
+    
+    # Direct credentials (alternative to .env)
+    parser.add_argument("--host",     default=None, help="Database host (overrides .env / default)")
+    parser.add_argument("--user",     default=None, help="Database user (overrides .env / default)")
+    parser.add_argument("--password", default=None, help="Database password (overrides .env / default)")
+    parser.add_argument("--database", default=None, help="Database name (overrides .env / default)")
+    
     return parser
 
 
+
+        
 def main():
     args = _build_parser().parse_args()
+    
+    if args.user and args.password is None:
+        args.password = getpass.getpass(prompt=f"Password for {args.user}@{args.host or 'localhost'}: ")
 
-    retriever = UniProtRetriever(get_db_config())
+    retriever = UniProtRetriever(get_db_config(
+    host=args.host,
+    user=args.user,
+    password=args.password,
+    database=args.database,
+    ))
 
     try:
         retriever.connect()
