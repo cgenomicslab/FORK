@@ -1,4 +1,10 @@
-# ------------------LIBRARIES----------------------------
+# ===========================================================================================================================
+
+#                                                       IMPORTS
+
+# ===========================================================================================================================
+
+
 from get_reference_uniprot_set_lib import (
     UniProtRetriever,
     get_db_config,
@@ -9,12 +15,16 @@ import os
 import sys
 import re
 import subprocess
+import hashlib
 
-# Safely import ETE4
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
+
+
 try:
     from ete4 import PhyloTree
-    from ete4.smartview import Layout, TextFace, SeqFace, BASIC_LAYOUT
+    from ete4.treeview import TreeStyle, SeqMotifFace, TextFace, NodeStyle
 
+    # from ete4.smartview import Layout, TextFace, SeqFace, RectFace, BASIC_LAYOUT
     ETE_AVAILABLE = True
 except ImportError as e:
     print(f"WARNING--Could not import ETE4 ({e}).")
@@ -80,12 +90,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--pfam", required=True, type=str)
     parser.add_argument("--taxids", required=False, type=str)
-    parser.add_argument("--cpu", type=str, default="32")
+    parser.add_argument("--cpu", type=str, default="4")
     parser.add_argument("--ml", default="fasttree", choices=["fasttree", "iqtree"])
     parser.add_argument(
         "--aln", default="mafft", choices=["mafft", "einsi", "clustalo"]
     )
-    parser.add_argument("--gt", type=str, default="0.1")
+    parser.add_argument("--gt", type=str, default="0.01")
     parser.add_argument("--colormap", required=False, type=str)
     parser.add_argument("--version", required=True, type=str)
     parser.add_argument("--evalue", required=False, type=float, default=None)
@@ -97,8 +107,14 @@ if __name__ == "__main__":
     parser.add_argument("--no_ncbi", action="store_true")
     parser.add_argument("--no_explore", action="store_true")
     parser.add_argument("--exclude_taxids", required=False, type=str)
+    parser.add_argument("--output_dir", required=False, type=str, default=None)
+    parser.add_argument("--render_ete_static", action="store_true")
 
     args = vars(parser.parse_args())
+
+    if args.get("output_dir"):
+        os.makedirs(args["output_dir"], exist_ok=True)
+        args["prefix"] = os.path.join(args["output_dir"], args["prefix"])
 
     print("INFO--Processing Pfam domains:", args["pfam"])
     pfams = args["pfam"].split(",")
@@ -161,7 +177,7 @@ if __name__ == "__main__":
             for seqid, gname in seqid2gene.items():
                 print("%s\t%s" % (seqid, gname), file=out)
 
-    aln_cpu = args["cpu"] if args["cpu"] != "AUTO" else 32
+    aln_cpu = args["cpu"] if args["cpu"] != "AUTO" else 4
     trimal_available = os.system("which trimal > /dev/null 2>&1") == 0
 
     def run_trimal(filename_aln):
@@ -175,6 +191,12 @@ if __name__ == "__main__":
         else:
             filename_trimal = filename_aln
         return filename_trimal
+
+    # ===========================================================================================================================
+
+    #                                                       ALIGNMENT
+
+    # ===========================================================================================================================
 
     if args["aln"] == "mafft":
         filename_aln = filename_fasta.replace(".fa", ".mft")
@@ -217,6 +239,12 @@ if __name__ == "__main__":
                 sys.exit(1)
 
     print("INFO--Loading tree in %s" % filename_tree)
+
+    # ===========================================================================================================================
+
+    #                                                       ITOL COLORMAP
+
+    # ===========================================================================================================================
 
     def generate_itol_color_strip(filename_tree, colormap, seqid2gene):
         itol_file = filename_tree + ".itol_colors.txt"
@@ -284,96 +312,299 @@ if __name__ == "__main__":
 
     generate_itol_color_strip(filename_tree, colormap, seqid2gene)
 
-    # ---------------------------------------------------------
-    # --- ETE4 VISUAL EXPLORER ---
-    # ---------------------------------------------------------
-    if not args["no_explore"] and ETE_AVAILABLE:
-        print(f"INFO--Starting ETE4 server on port {args['port']}")
+    # ===========================================================================================================================
 
-        def _draw_leaf(node):
-            if node.is_leaf:
-                name_parts = node.name.split(".")
-                display = name_parts[1] if len(name_parts) > 1 else node.name
-                gene = node.props.get("gene_name", "")
-                sci = node.props.get("sci_name", "")
-                label = f"{display}  {gene}  [{sci}]".strip(" []")
-                node.add_face(
-                    TextFace(label, color="black"), column=0, position="branch_right"
-                )
+    #                                                       ITOL DOMAINS
 
-        leaf_name_layout = Layout(name="Leaf names", active=True, draw_node=_draw_leaf)
+    # ===========================================================================================================================
 
-        # ── OTHER ETE4 LAYOUT SYNTAX (Using node.add_face) ──
-        # def node_names_style(node):
-        #     if node.is_leaf:
-        #         try:
-        #             sci = node.props.get('sci_name', '')
-        #             gene = node.props.get('gene_name', '-')
-        #             name_parts = node.name.split(".")
-        #             display_name = name_parts[1] if len(name_parts) > 1 else node.name
+    def generate_itol_domains(filename_tree, domain_dict, name2seq):
+        itol_file = filename_tree + ".itol_domains.txt"
+        palette = [
+            "#e6194B",
+            "#3cb44b",
+            "#4363d8",
+            "#f58231",
+            "#911eb4",
+            "#42d4f4",
+            "#f032e6",
+            "#469990",
+            "#9A6324",
+            "#800000",
+        ]
+        names = sorted({d["hmm_name"] for hits in domain_dict.values() for d in hits})
+        color_of = {n: palette[i % len(palette)] for i, n in enumerate(names)}
 
-        #             node.add_face(TextFace(display_name), column=0, position='right')
-        #             node.add_face(TextFace(f" ({gene}) "), column=1, position='right')
-        #             node.add_face(TextFace(f" ({sci}) "), column=2, position='right')
-        #         except Exception:
-        #             node.add_face(TextFace(node.name), column=0, position='right')
-
-        def layout_seqface(node):
-            if node.is_leaf:
-                seq = node.props.get("seq")
-                if seq:
-                    node.add_face(
-                        SeqFace(seq, seqtype="aa"), column=0, position="aligned"
+        with open(itol_file, "w") as f:
+            f.write(
+                "DATASET_DOMAINS\nSEPARATOR TAB\nDATASET_LABEL\tPfam domains\nCOLOR\t#000000\n"
+            )
+            f.write("LEGEND_TITLE\tDomains\n")
+            f.write("LEGEND_SHAPES\t" + "\t".join(["RE"] * len(names)) + "\n")
+            f.write("LEGEND_COLORS\t" + "\t".join(color_of[n] for n in names) + "\n")
+            f.write("LEGEND_LABELS\t" + "\t".join(names) + "\n")
+            f.write("DATA\n")
+            for seqid, seq in name2seq.items():
+                acc = seqid.split(".", 1)[1] if "." in seqid else seqid
+                hits = domain_dict.get(acc, [])
+                if not hits:
+                    continue
+                fields = [seqid, str(len(seq))]
+                for d in hits:
+                    fields.append(
+                        f"RE|{d['ali_from']}|{d['ali_to']}|{color_of[d['hmm_name']]}|{d['hmm_name']}"
                     )
+                f.write("\t".join(fields) + "\n")
 
+    # ===========================================================================================================================
+
+    #                                                           ETE4
+
+    # ===========================================================================================================================
+    def get_species_name(node):
+        return node.name.split(".")[0]
+
+    if ETE_AVAILABLE:
         try:
             with open(filename_tree, "r") as f:
                 nwk_str = f.read().strip()
             if not nwk_str.endswith(";"):
                 nwk_str += ";"
 
-            t = PhyloTree(
-                nwk_str, sp_naming_function=lambda node: node.name.split(".")[0]
-            )
+            t = PhyloTree(nwk_str, sp_naming_function=get_species_name)
             t.set_outgroup(t.get_midpoint_outgroup())
             t.resolve_polytomy(descendants=True)
 
-            if not args["no_ncbi"]:
-                try:
-                    t.annotate_ncbi_taxa()
-                except Exception as e:
-                    print(f"WARNING--NCBI taxonomy annotation failed: {e}")
+            # Fetch Domain Data
+            domain_dict = {}
+            try:
+                leaf_accs = [
+                    n.name.split(".", 1)[1] for n in t.leaves() if "." in n.name
+                ]
+                if leaf_accs:
+                    hits = fetch_domains_by_accession(args["version"], leaf_accs)
+                    for d in hits:
+                        domain_dict.setdefault(d["accession"], []).append(d)
+                    for acc in domain_dict:
+                        domain_dict[acc].sort(key=lambda x: x["ali_from"])
+                print(f"INFO--Domain data loaded for {len(domain_dict)} proteins")
+            except Exception as e:
+                print(f"WARNING--Could not fetch domain data: {e}")
 
-            # Attach sequences if MSA is present
-            name2seq = {}
-            if args.get("MSA") and os.path.isfile(filename_aln):
-                name2seq = get_seqs(filename_aln)
+            if domain_dict:
+                generate_itol_domains(
+                    filename_tree, domain_dict, get_seqs(filename_fasta)
+                )
+                print(
+                    f"INFO--iTOL domains file written: {filename_tree}.itol_domains.txt"
+                )
 
-            # ── ATTACH LABELS DIRECTLY TO NODES (Bypasses Layout Bugs) ──
-            for node in t.traverse():
-                if colormap and "lineage" in node.props:
-                    for taxid in node.props["lineage"][::-1]:
-                        if str(taxid) in colormap:
-                            node.add_prop("color", colormap[str(taxid)])
-                            break
-                if node.is_leaf:
-                    node.add_prop("gene_name", seqid2gene.get(node.name, "-"))
-                    if args.get("MSA") and node.name in name2seq:
-                        node.add_prop("seq", name2seq[node.name])
+            # Color generation
+            def _domain_color(name):
+                h = int(hashlib.md5(name.encode()).hexdigest()[:6], 16)
+                return "#{:02x}{:02x}{:02x}".format(
+                    (h >> 16) & 0xFF, (h >> 8) & 0xFF, h & 0xFF
+                )
+
+            # ---------------------------------------------------------------------------------------
+            # MODE A: STATIC PNG GENERATOR WITH DOMAINS DISPLAYED
+            # ---------------------------------------------------------------------------------------
+            if args.get("render_ete_static"):
+                print("INFO--Generating static tree image with custom domain shapes...")
+
+                t_static = (
+                    t.copy()
+                )  # separating static from live ete windows to avoid static faces mixing with the interactive mode
+
+                # Fetch local sequences
+                name2seq = (
+                    get_seqs(filename_aln)
+                    if (args.get("MSA") and os.path.isfile(filename_aln))
+                    else get_seqs(filename_fasta)
+                )
+
+                def _get_static_shape(domain_name):
+                    shapes = ["[]", "()", "<>", "^", "v", "o"]
+                    shape_idx = int(
+                        hashlib.md5(domain_name.encode()).hexdigest()[-2:], 16
+                    ) % len(shapes)
+                    return shapes[shape_idx]
+
+                for node in t_static.traverse():
+                    if colormap and "lineage" in node.props:
+                        for taxid in node.props["lineage"][::-1]:
+                            if str(taxid) in colormap:
+                                nstyle = NodeStyle()
+                                nstyle["vt_line_color"] = colormap[str(taxid)]
+                                nstyle["hz_line_color"] = colormap[str(taxid)]
+                                node.set_style(nstyle)
+                                break
+                    if node.is_leaf:
+                        name_parts = node.name.split(".")
+                        display = name_parts[1] if len(name_parts) > 1 else node.name
+                        gene = seqid2gene.get(node.name, "")
                         node.add_face(
-                            SeqFace(name2seq[node.name], seqtype="aa"),
-                            column=3,
-                            position="aligned",
+                            TextFace(f"{display}  {gene}  "),
+                            column=0,
+                            position="branch-right",
                         )
 
-            t.explore(
-                layouts=[BASIC_LAYOUT],
-                keep_server=True,
-                quiet=True,
-                port=args["port"],
-                host="0.0.0.0",
-                show_leaf_name=True,
-            )
+                        seq = name2seq.get(node.name, None)
+                        accession = name_parts[1] if len(name_parts) > 1 else node.name
+                        domains = domain_dict.get(accession, [])
+
+                        if seq:
+                            motifs = []
+                            for d in domains:
+                                motifs.append(
+                                    [
+                                        d["ali_from"],
+                                        d["ali_to"],
+                                        _get_static_shape(d["hmm_name"]),
+                                        None,
+                                        14,
+                                        "black",
+                                        _domain_color(d["hmm_name"]),
+                                        f"arial|8|black|{d['hmm_name']}",
+                                    ]
+                                )
+                            node.add_face(
+                                SeqMotifFace(seq, motifs=motifs, seq_format="-"),
+                                column=1,
+                                position="aligned",
+                            )
+
+                ts = TreeStyle()
+                ts.show_leaf_name = False
+                output_img = f"{args['prefix']}_tree_domains.png"
+                t_static.render(output_img, tree_style=ts)
+                print(f"Wrote file: {output_img}")
+                print(f"INFO--Success. Static tree image saved to: {output_img}")
+
+            # ---------------------------------------------------------------------------------------
+            # MODE B: INTERACTIVE EXPLORER
+            # ---------------------------------------------------------------------------------------
+            if not args.get("no_explore"):
+                print(f"INFO--Starting ETE4 server on port {args['port']}")
+
+                from ete4.smartview import (
+                    Layout,
+                    TextFace as SmartTextFace,
+                    SeqFace,
+                    RectFace,
+                    BASIC_LAYOUT,
+                )
+
+                def _draw_leaf(node):
+                    if not node.is_leaf:
+                        return
+                    name_parts = node.name.split(".")
+                    display = name_parts[1] if len(name_parts) > 1 else node.name
+                    gene = node.props.get("gene_name", "")
+                    sci = node.props.get("sci_name", "")
+                    label = f"{display}  {gene}  [{sci}]".strip(" []")
+                    return SmartTextFace(
+                        label, style="fill: black;", position="right", column=0
+                    )
+
+                leaf_name_layout = Layout(
+                    name="Leaf names", active=True, draw_node=_draw_leaf
+                )
+
+                def layout_seqface(node):
+                    if node.is_leaf:
+                        seq = node.props.get("seq")
+                        if seq:
+                            node.add_face(
+                                SeqFace(seq, seqtype="aa"), column=0, position="aligned"
+                            )
+
+                # Build aliases — one per unique domain name
+                unique_domain_names = sorted(
+                    {d["hmm_name"] for hits in domain_dict.values() for d in hits}
+                )
+                name_to_alias = {
+                    n: f"dom-{i}" for i, n in enumerate(unique_domain_names)
+                }
+                domain_aliases = {
+                    name_to_alias[n]: {
+                        "fill": _domain_color(n),
+                        "stroke": "black",
+                        "stroke-width": "1",
+                    }
+                    for n in unique_domain_names
+                }
+
+                def _draw_domains(node):
+                    if not node.is_leaf:
+                        return
+                    accession = (
+                        node.name.split(".", 1)[1] if "." in node.name else node.name
+                    )
+                    domains = domain_dict.get(accession, [])
+                    if not domains:
+                        return
+                    seq_len = max(d["ali_to"] for d in domains)
+                    faces = []
+                    for i, d in enumerate(domains):
+                        width = max(
+                            30, int((d["ali_to"] - d["ali_from"]) / seq_len * 200)
+                        )
+                        faces.append(
+                            RectFace(
+                                wmax=width,
+                                hmax=18,
+                                style=name_to_alias[d["hmm_name"]],
+                                text=d["hmm_name"],
+                                position="aligned",
+                                column=i + 1,
+                            )
+                        )
+                    return faces
+
+                domain_layout = Layout(
+                    name="Domains",
+                    active=True,
+                    draw_tree={"aliases": domain_aliases},
+                    draw_node=_draw_domains,
+                )
+
+                if not args.get("no_ncbi"):
+                    try:
+                        t.annotate_ncbi_taxa()
+                    except Exception as e:
+                        print(f"WARNING--NCBI taxonomy annotation failed: {e}")
+
+                # Attach sequences if MSA is present
+                name2seq = {}
+                if args.get("MSA") and os.path.isfile(filename_aln):
+                    name2seq = get_seqs(filename_aln)
+
+                # ATTACH LABELS DIRECTLY TO NODES
+                for node in t.traverse():
+                    if colormap and "lineage" in node.props:
+                        for taxid in node.props["lineage"][::-1]:
+                            if str(taxid) in colormap:
+                                node.add_prop("color", colormap[str(taxid)])
+                                break
+                    if node.is_leaf:
+                        node.add_prop("gene_name", seqid2gene.get(node.name, "-"))
+                        if args.get("MSA") and node.name in name2seq:
+                            node.add_prop("seq", name2seq[node.name])
+                            node.add_face(
+                                SeqFace(name2seq[node.name], seqtype="aa"),
+                                column=3,
+                                position="aligned",
+                            )
+
+                t.explore(
+                    layouts=[BASIC_LAYOUT, leaf_name_layout, domain_layout],
+                    keep_server=True,
+                    quiet=True,
+                    port=args["port"],
+                    host="0.0.0.0",
+                    show_leaf_name=True,
+                )
 
         except Exception as e:
-            print(f"ERROR--Failed to launch ETE4 explorer: {e}")
+            print(f"ERROR--Failed running ETE4 Graphics Engine: {e}")

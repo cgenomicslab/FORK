@@ -61,9 +61,11 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Configuration helper
-# ---------------------------------------------------------------------------
+# ==========================================================================================================
+
+#                                       CONFIGURATION HELPER
+
+# ==========================================================================================================
 
 
 def get_db_config(host=None, user=None, password=None, database=None):
@@ -74,15 +76,6 @@ def get_db_config(host=None, user=None, password=None, database=None):
     users can override any value when calling this function, or by
     setting environment variables in a .env file:
         DB_HOST, DB_USER, DB_PASSWORD, DB_NAME
-
-    Parameters
-    ----------
-    host, user, password, database : str, optional
-        Explicit overrides — take priority over everything else.
-
-    Returns
-    -------
-    dict  ready to pass into UniProtRetriever(config)
     """
     return {
         "host": host or os.getenv("DB_HOST", "localhost"),
@@ -92,9 +85,10 @@ def get_db_config(host=None, user=None, password=None, database=None):
     }
 
 
-# ---------------------------------------------------------------------------
-# Core class
-# ---------------------------------------------------------------------------
+# ==========================================================================================================
+
+#                                               CORE CLASS
+# ==========================================================================================================
 
 
 class UniProtRetriever:
@@ -122,21 +116,16 @@ class UniProtRetriever:
     """
 
     def __init__(self, config):
-        """
-        Parameters
-        ----------
-        config : dict
-            mysql.connector connection parameters.
-            Use get_db_config() to build this from environment variables.
-        """
+  
         self.config = config
         self.conn = None
         self.cursor = None
 
-    # ------------------------------------------------------------------
-    # Connection management
-    # ------------------------------------------------------------------
+# ==========================================================================================================
 
+#                                       CONNECTION MANAGEMENT
+
+# ==========================================================================================================
     def connect(self):
         """
         Open the database connection.
@@ -160,18 +149,16 @@ class UniProtRetriever:
         self.close()
         return False
 
-    # ------------------------------------------------------------------
-    # Utility queries
-    # ------------------------------------------------------------------
+# ==========================================================================================================
+
+#                                       UTILITY QUERIES
+
+# ==========================================================================================================
 
     def list_available_versions(self):
         """
         Print a summary table of all versions present in the database.
 
-        Returns
-        -------
-        list[dict]  one dict per version with keys:
-                    version, protein_count, taxon_count, proteome_count
         """
         query = """
             SELECT version,
@@ -215,9 +202,11 @@ class UniProtRetriever:
         self.cursor.execute(query, (version,))
         return [row["proteome_id"] for row in self.cursor.fetchall()]
 
-    # ------------------------------------------------------------------
-    # Main retrieval
-    # ------------------------------------------------------------------
+# ==========================================================================================================
+
+#                                               MAIN RETRIEVAL
+
+# ==========================================================================================================
 
     def get_proteins(
         self,
@@ -232,24 +221,7 @@ class UniProtRetriever:
 
         All filters are optional and combinable.
 
-        Parameters
-        ----------
-        version : str
-            UniProt release version, e.g. "2026_01".
-        taxon_ids : int or list[int], optional
-            One or more NCBI Taxonomy IDs.
-        proteome_id : str, optional
-            UniProt Proteome ID, e.g. "UP000005640".
-        go_id : str, optional
-            Gene Ontology term, e.g. "GO:0005634".
-        pfam_id : str, optional
-            Pfam domain accession, e.g. "PF00870".
 
-        Returns
-        -------
-        list[dict]
-            Each dict has keys:
-            accession, name, organism, taxon_id, proteome_id, sequence
         """
         query = """
             SELECT p.accession, p.name, p.organism,
@@ -300,9 +272,11 @@ class UniProtRetriever:
         except mysql.connector.Error as err:
             raise RuntimeError(f"Database query failed: {err}") from err
 
-    # ------------------------------------------------------------------
-    # HMM hit based retrieval
-    # ------------------------------------------------------------------
+# ==========================================================================================================
+
+#                                       HMM HIT BASED RETRIEVAL
+
+# ==========================================================================================================
     def get_proteins_by_hmm_hit(
         self,
         version,
@@ -325,23 +299,6 @@ class UniProtRetriever:
 
         Suitable for phylogenetic tree building pipelines.
 
-        Parameters
-        ----------
-        version : str
-            UniProt release version, e.g. "2026_01".
-        hmm_query : str
-            Pfam name (e.g., "Homeodomain") OR Accession (e.g., "PF00046").
-        evalue_cutoff : float, optional
-            Maximum full sequence E-value to consider a hit valid.
-            Defaults to None.
-        taxon_ids : int or list[int], optional
-            Filter by specific NCBI Taxonomy IDs.
-
-        Returns
-        -------
-        list[dict]
-            Each dict has keys: accession, name, organism, taxon_id,
-            proteome_id, sequence.
 
         Examples
         --------
@@ -397,9 +354,11 @@ class UniProtRetriever:
         except mysql.connector.Error as err:
             raise RuntimeError(f"Database query failed: {err}") from err
 
-    # ------------------------------------------------------------------
-    # Domain lookup by accession
-    # ------------------------------------------------------------------
+# ==========================================================================================================
+
+#                                       DOMAIN LOOKUP BY ACCESSION
+
+# ==========================================================================================================
 
     def get_domains_by_accession(
         self,
@@ -420,30 +379,6 @@ class UniProtRetriever:
         Large accession lists are chunked automatically (default 5,000
         per query) so the IN (...) clause never becomes a bottleneck.
 
-        Parameters
-        ----------
-        version : str
-            UniProt release version, e.g. "2026_01".
-        accessions : str or list[str]
-            One or more UniProt accessions, e.g. ["P04637", "P10275"].
-        evalue_cutoff : float, optional
-            Maximum full-sequence E-value. Default: 1e-5.
-            Note: all results already passed gathering thresholds during
-            the hmmsearch — this is an additional filter on top of that.
-        chunk_size : int, optional
-            Maximum number of accessions per SQL query. Default: 5000.
-
-        Returns
-        -------
-        list[dict]
-            One dict per domain occurrence. Keys:
-            accession, protein_name, organism, taxon_id, proteome_id,
-            hmm_name, hmm_accession,
-            domain_number, domain_count,
-            full_evalue, full_score,
-            domain_evalue, domain_score,
-            ali_from, ali_to, hmm_from, hmm_to, env_from, env_to.
-            Sorted by accession, then ali_from.
 
         Examples
         --------
@@ -559,24 +494,7 @@ class UniProtRetriever:
         Step 1 of the two-tier resolution workflow.
         Returns flat rows — pivot with pandas in the UI layer.
 
-        Parameters
-        ----------
-        version : str
-            UniProt release version, e.g. "2026_01".
-        pfam_queries : list[str]
-            One or more Pfam names OR accessions.
-            Name match: exact (h.hmm_name = %s)
-            Accession match: prefix (h.hmm_accession LIKE 'PF00046%')
-        taxon_ids : int or list[int], optional
-        evalue_cutoff : float, optional
 
-        Returns
-        -------
-        list[dict]
-            Keys: taxon_id, scientific_name, hmm_name, hmm_accession,
-                  hmm_type, protein_count
-            scientific_name is taken from the proteins table (MIN(organism)
-            per taxon_id) — reliable because that column is always populated.
         """
         if isinstance(pfam_queries, str):
             pfam_queries = [pfam_queries]
@@ -679,26 +597,7 @@ class UniProtRetriever:
         Call this when the user clicks a cell in the UI. The returned
         accessions are then passed directly into get_subprofile_hits()
         and/or get_domain_architectures() for step-2 drill-down.
-
-        Parameters
-        ----------
-        version : str
-            UniProt release version, e.g. "2026_01".
-        pfam_query : str
-            A single Pfam name or accession identifying the column clicked.
-        taxon_id : int
-            The taxon ID identifying the row clicked.
-        evalue_cutoff : float, optional
-            Same cutoff used when building the matrix, for consistency.
-
-        Returns
-        -------
-        list[dict]
-            One dict per protein. Keys:
-                accession, protein_name, organism, taxon_id, proteome_id
-            (No sequence — sequences are only fetched if the user
-            requests them explicitly.)
-
+        
         Example
         -------
         # User clicks the (9606, "Homeodomain") cell:
@@ -752,29 +651,14 @@ class UniProtRetriever:
         that hit at least one of those proteins — sorted by how many proteins
         carry each profile.
 
-        This is Step 2, Path A: "deeper HMM resolution."
+        Step 2, Path A: "deeper HMM resolution."
         The original broad Pfam (e.g. Homeodomain) will appear at the top.
         Below it you will find more specific profiles — TIGRFAMs, sub-Pfams,
         SUPERFAMILYs — that subdivide this protein set into functional
         sub-groups (e.g. Histamine DC, Tyramine DC, Dopamine DC).
 
-        Parameters
-        ----------
-        version : str
-        accessions : list[str]
-            Output of get_accessions_for_cell(), or any accession list.
-        evalue_cutoff : float, optional
-            Applied to ALL profiles returned, not just the original query.
-        exclude_queries : list[str], optional
-            Profile names/accessions to suppress from results. Useful for
-            hiding the original broad Pfam so the sub-profiles stand out.
-            e.g. exclude_queries=["Homeodomain", "PF00046"]
-        chunk_size : int
-            Accessions per SQL chunk. Default 5000.
+        Returns:
 
-        Returns
-        -------
-        list[dict]
             Sorted by protein_count descending. Keys:
                 hmm_name        str
                 hmm_accession   str    (versioned, e.g. "TIGR00001.1")
@@ -895,31 +779,6 @@ class UniProtRetriever:
         Architecture is defined as the ordered, left-to-right sequence of
         domain names on a protein (ordered by ali_from, i.e. alignment start
         in the protein sequence).
-
-        Parameters
-        ----------
-        version : str
-        accessions : list[str]
-        evalue_cutoff : float, optional
-        collapse_repeats : bool, optional  Default True.
-            If True,  "ANK+ANK+ANK+KH" → "ANK+KH"  (unique domains in order
-            of first occurrence). Keeps patterns readable when a family has
-            many tandem repeats.
-            If False, each domain occurrence is retained. Use False when
-            the exact repeat count is biologically meaningful.
-        chunk_size : int  Default 5000.
-
-        Returns
-        -------
-        list[dict]
-            Sorted by protein_count descending. Keys:
-                architecture        str    e.g. "Homeodomain+PBC"
-                arch_accessions     str    e.g. "PF00046.36+PF03792.19"
-                                           (same order as architecture,
-                                            first accession per domain name)
-                protein_count       int
-                coverage            float  fraction of input set
-                example_accessions  list[str]  up to 5 example proteins
 
         Example
         -------
@@ -1053,22 +912,6 @@ class UniProtRetriever:
         Large accession lists are chunked automatically (default 5,000
         per query) so the IN (...) clause never happens a bottleneck.
 
-        Parameters
-        ----------
-        version : str
-            UniProt release version, e.g. "2026_01".
-        accessions : str or list[str]
-            One or more UniProt accessions, e.g. ["P04637", "P10275"].
-        chunk_size : int, optional
-            Maximum number of accessions per SQL query. Default: 5000.
-
-        Returns
-        -------
-        list[dict]
-            Each dict has keys:
-            accession, name, organism, taxon_id, proteome_id, sequence.
-            Order follows the chunked query order (i.e. input order within
-            each chunk).
 
         Examples
         --------
@@ -1120,13 +963,6 @@ class UniProtRetriever:
         This does NOT write any file — the string is returned so callers
         can pass it directly to parsers (e.g. Bio.SeqIO.parse via StringIO).
 
-        Parameters
-        ----------
-        records : list[dict]  output of get_proteins()
-
-        Returns
-        -------
-        str  multi-sequence FASTA string
         """
         lines = []
         for rec in records:
@@ -1142,17 +978,6 @@ class UniProtRetriever:
         Useful for alignment tools, tree building (ETE3, DendroPy, etc.),
         and any workflow that expects SeqRecord objects.
 
-        Parameters
-        ----------
-        records : list[dict]  output of get_proteins()
-
-        Returns
-        -------
-        list[Bio.SeqRecord.SeqRecord]
-            Each SeqRecord has:
-            - id          = "{taxon_id}.{accession}"
-            - name        = "{accession}"
-            - description = "{protein_name} [{organism}] UP={proteome_id}"
         """
         try:
             from Bio.Seq import Seq
@@ -1181,22 +1006,6 @@ class UniProtRetriever:
         """
         Write protein records to a FASTA file.
 
-        Parameters
-        ----------
-        records : list[dict]  output of get_proteins()
-        version : str         e.g. "2026_01"  (used in auto-generated filename)
-        identifier : str      label for the file  (e.g. proteome ID, taxon tag)
-        output_dir : str, optional
-            Directory to write the file into.  Defaults to the current
-            working directory.  Created automatically if it does not exist.
-        filename : str, optional
-            Override the auto-generated filename entirely.
-            If not given, the file is named:
-            uniprot_<identifier>_<version>.fasta
-
-        Returns
-        -------
-        str  absolute path of the written file
         """
         if filename is None:
             filename = f"uniprot_{identifier}_{version}.fasta"
@@ -1214,10 +1023,12 @@ class UniProtRetriever:
         return os.path.abspath(filepath)
 
 
-# ---------------------------------------------------------------------------
-# Module-level convenience functions
-# (users can call these without managing a class instance)
-# ---------------------------------------------------------------------------
+# ==========================================================================================================
+
+#                            MODULE LEVEL CONVENIENCE FUNCTIONS/ User can import 
+#                                       without using the class
+
+# ==========================================================================================================
 
 
 def fetch_sequences(
@@ -1231,21 +1042,6 @@ def fetch_sequences(
     """
     One-call helper: connect → query → disconnect → return records.
 
-    Parameters
-    ----------
-    version : str
-        UniProt release version, e.g. "2026_01".
-    taxon_ids : int or list[int], optional
-    proteome_id : str, optional
-    go_id : str, optional
-    pfam_id : str, optional
-    db_config : dict, optional
-        Override connection parameters. Defaults to get_db_config()
-        (reads from environment variables / .env file).
-
-    Returns
-    -------
-    list[dict]  keys: accession, name, organism, taxon_id, proteome_id, sequence
 
     Example
     -------
@@ -1278,23 +1074,6 @@ def fetch_sequences_by_hmm_hit(
     Results are deduplicated — one sequence per protein regardless of domain copy count.
     Suitable as a direct input to alignment and tree-building pipelines.
 
-    Parameters
-    ----------
-    version : str
-        UniProt release version, e.g. "2026_01".
-    hmm_query : str
-        Pfam name (e.g. "Homeodomain") or accession (e.g. "PF00046").
-        Accession matching is prefix-based so "PF00046" matches "PF00046.36".
-    evalue_cutoff : float, optional
-        Maximum full-sequence E-value. Default: 1e-5.
-    taxon_ids : int or list[int], optional
-        Filter by one or more NCBI Taxonomy IDs.
-    db_config : dict, optional
-        Override connection parameters. Defaults to get_db_config().
-
-    Returns
-    -------
-    list[dict]  keys: accession, name, organism, taxon_id, proteome_id, sequence
 
     Examples
     --------
@@ -1332,7 +1111,7 @@ def fetch_fasta_string(
     """
     One-call helper: connect → query → return a FASTA string.
 
-    Useful for piping directly into Bio.SeqIO.parse() without writing a file.
+    Useful for sending directly into Bio.SeqIO.parse() without writing a file.
 
     Example
     -------
@@ -1367,17 +1146,6 @@ def fetch_fasta_string_by_hmm_hit(
     Useful for piping HMM-filtered sequences directly into Bio.SeqIO.parse()
     without writing a file.
 
-    Parameters
-    ----------
-    version : str
-    hmm_query : str   Pfam name or accession
-    evalue_cutoff : float, optional  Default: 1e-5
-    taxon_ids : int or list[int], optional
-    db_config : dict, optional
-
-    Returns
-    -------
-    str  multi-sequence FASTA string
 
     Example
     -------
@@ -1413,26 +1181,6 @@ def fetch_domains_by_accession(
     this when you need domain coordinates, scores, and HMM accessions
     rather than sequences.
 
-    Parameters
-    ----------
-    version : str
-        UniProt release version, e.g. "2026_01".
-    accessions : str or list[str]
-        One or more UniProt protein accessions.
-    evalue_cutoff : float, optional
-        Maximum full-sequence E-value. Default: 1e-5.
-    chunk_size : int, optional
-        Accessions per SQL query — chunked automatically. Default: 5000.
-    db_config : dict, optional
-        Override connection parameters. Defaults to get_db_config().
-
-    Returns
-    -------
-    list[dict]
-        Keys: accession, protein_name, organism, taxon_id, proteome_id,
-        hmm_name, hmm_accession, domain_number, domain_count,
-        full_evalue, full_score, domain_evalue, domain_score,
-        ali_from, ali_to, hmm_from, hmm_to, env_from, env_to.
 
     Examples
     --------
@@ -1473,21 +1221,6 @@ def fetch_sequences_by_accession(
     One-call helper: connect → query proteins + sequences → disconnect →
     return full protein records for the given accession(s).
 
-    Parameters
-    ----------
-    version : str
-        UniProt release version, e.g. "2026_01".
-    accessions : str or list[str]
-        One or more UniProt protein accessions.
-    chunk_size : int, optional
-        Accessions per SQL query — chunked automatically. Default: 5000.
-    db_config : dict, optional
-        Override connection parameters. Defaults to get_db_config().
-
-    Returns
-    -------
-    list[dict]
-        Keys: accession, name, organism, taxon_id, proteome_id, sequence.
 
     Examples
     --------
@@ -1545,9 +1278,6 @@ def fetch_accessions_for_cell(
     One-call helper: connect → get accessions for one matrix cell → disconnect.
 
 
-    Returns
-    -------
-    list[dict]  keys: accession, protein_name, organism, taxon_id, proteome_id
     """
     config = db_config or get_db_config()
     with UniProtRetriever(config) as db:
@@ -1569,11 +1299,6 @@ def fetch_subprofile_hits(
     """
     One-call helper for Step 2, Path A (sub-profile enrichment).
 
-
-    Returns
-    -------
-    list[dict]  keys: hmm_name, hmm_accession, hmm_type, protein_count,
-                      coverage, best_evalue, best_score
     """
     config = db_config or get_db_config()
     with UniProtRetriever(config) as db:
@@ -1612,9 +1337,11 @@ def fetch_domain_architectures(
         )
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+# ==========================================================================================================
+
+#                                                CLI
+
+# ==========================================================================================================
 
 
 def _build_parser():

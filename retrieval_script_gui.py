@@ -3,6 +3,8 @@ import get_reference_uniprot_set_lib as uni
 import subprocess
 import pandas as pd
 import os
+import socket
+import time
 
 import viz_utils as viz
 import streamlit.components.v1 as components
@@ -21,7 +23,13 @@ with st.sidebar.expander("DB Config"):
     db_name = st.text_input("Database", value=default_config["database"])
     config = uni.get_db_config(host=host, user=user, database=db_name)
 
-# --- MAIN NAVIGATION ---
+# ==========================================================================================================
+
+#                                               MAIN NAVIGATION
+
+# ==========================================================================================================
+
+
 menu = [
     "Standard Retrieval",
     "HMM Search",
@@ -34,19 +42,39 @@ menu = [
 ]
 choice = st.selectbox("Select Functionality", menu)
 
+
+# ==========================================================================================================
+
+#                                               STANDARD RETRIEVAL TAB
+
+# ==========================================================================================================
+
 if choice == "Standard Retrieval":
     st.header("Filtered Sequence Retrieval")
     col1, col2 = st.columns(2)
     with col1:
         ver = st.text_input("UniProt Version", value="2026_01")
         tax = st.text_input("Taxonomy IDs (comma separated, e.g. 9606, 10090)")
+        tax_file = st.file_uploader(
+            "Or upload txt (one ID per line)", type=["txt"], key="sr_tax_file"
+        )
     with col2:
         proteome = st.text_input("Proteome ID (Optional)")
         go_id = st.text_input("GO ID (Optional)")
         pfam_id = st.text_input("Pfam ID (Optional)")
 
     if st.button("Fetch Sequences"):
-        tax_ids = [int(t.strip()) for t in tax.split(",")] if tax else None
+        tax_ids = (
+            [
+                int(l.strip())
+                for l in tax_file.getvalue().decode().splitlines()
+                if l.strip()
+            ]
+            if tax_file
+            else (
+                [int(t.strip()) for t in tax.split(",") if t.strip()] if tax else None
+            )
+        )
         records = uni.fetch_sequences(
             ver, tax_ids, proteome, go_id, pfam_id, db_config=config
         )
@@ -62,6 +90,13 @@ if choice == "Standard Retrieval":
         else:
             st.warning("No records found.")
 
+
+# ==========================================================================================================
+
+#                                               HMM SEARCH TAB
+
+# ==========================================================================================================
+
 elif choice == "HMM Search":
     st.header("HMM Hit Retrieval")
     ver = st.text_input("UniProt Version", value="2026_01")
@@ -73,9 +108,28 @@ elif choice == "HMM Search":
         else None
     )
     tax = st.text_input("Taxonomy Filter (Optional, comma separated)")
+    tax_file = st.file_uploader(
+        "Or upload txt (one ID per line)", type=["txt"], key="hmm_tax_file"
+    )
+    if tax_file is not None:
+        st.session_state["hmm_tax_content"] = tax_file.getvalue().decode()
 
     if st.button("Run HMM Search"):
-        tax_ids = [int(t.strip()) for t in tax.split(",")] if tax else None
+        if (
+            "hmm_tax_content" in st.session_state
+            and st.session_state["hmm_tax_content"].strip()
+        ):
+            tax_ids = ",".join(
+                l.strip()
+                for l in st.session_state["hmm_tax_content"].splitlines()
+                if l.strip()
+            )
+        elif tax:
+            tax_ids = tax.replace(" ", "")
+        else:
+            tax_ids = None
+        tax_ids = [int(t) for t in tax_ids.split(",") if t.strip()] if tax_ids else None
+
         records = uni.fetch_sequences_by_hmm_hit(
             ver, hmm_query, eval_cutoff, tax_ids, db_config=config
         )
@@ -91,10 +145,19 @@ elif choice == "HMM Search":
         else:
             st.warning("No records found.")
 
+
+# ==========================================================================================================
+
+#                                               ACCESSION LOOKUP TAB
+
+# ==========================================================================================================
+
 elif choice == "Accession Lookup":
-    st.header("Batch Accession Retrieval")
+    st.header("Batch Accession or Protein name Retrieval")
     ver = st.text_input("UniProt Version", value="2026_01")
-    acc_input = st.text_area("Paste Accessions (one per line or space separated)")
+    acc_input = st.text_area(
+        "Paste Accessions or Protein names (one per line or space separated)"
+    )
 
     if st.button("Get Sequences"):
         acc_list = acc_input.replace(",", " ").split()
@@ -109,10 +172,16 @@ elif choice == "Accession Lookup":
         else:
             st.warning("No records found.")
 
+# ==========================================================================================================
+
+#                                              DOMAIN COORDINATES LOOKUP TAB
+
+# ==========================================================================================================
+
 elif choice == "Domain Coordinate Lookup":
     st.header("Protein Domain Architecture")
     ver = st.text_input("UniProt Version", value="2026_01")
-    acc_input = st.text_area("Enter Accessions")
+    acc_input = st.text_area("Enter Accessions or Protein names")
     use_evalue = st.checkbox("Apply E-value cutoff")
     eval_cutoff = (
         st.number_input("E-value Cutoff", value=1e-5, format="%.1e")
@@ -151,7 +220,7 @@ elif choice == "Domain Coordinate Lookup":
         st.download_button(
             "Download CSV", df.to_csv(index=False), "domains.csv", key="dc_csv_dl"
         )
-        # --------- Domain Coordinate Lookup tab ---------
+
         # ──----------------- Architecture diagram ────────────────────────────────────
         # The domain records already in memory are passed directly to
         # viz_utils — no additional DB call needed.
@@ -185,12 +254,24 @@ elif choice == "Domain Coordinate Lookup":
             )
 
 
+# ==========================================================================================================
+
+#                                               DATABASE INFO TAB
+
+# ==========================================================================================================
 elif choice == "Database Info":
     st.header("Database Status")
     if st.button("List Versions & Stats"):
         with uni.UniProtRetriever(config) as db:
             versions = db.list_available_versions()
             st.table(versions)
+
+
+# ==========================================================================================================
+
+#                                              PHYLOGENETIC TREE TAB
+
+# ==========================================================================================================
 
 elif choice == "Phylogenetic Tree":
     st.header("Phylogenetic Tree Builder")
@@ -202,13 +283,28 @@ elif choice == "Phylogenetic Tree":
             placeholder="e.g. Homeodomain, PF00001,PF00002",
         )
         tax = st.text_input("Taxonomy IDs (comma separated, optional)")
+        tax_file = st.file_uploader(
+            "Or upload txt (one ID per line)", type=["txt"], key="tree_tax_file"
+        )
+        if tax_file is not None:
+            st.session_state["tree_tax_content"] = tax_file.getvalue().decode()
         exclude_tax = st.text_input("Exclude Taxonomy IDs (comma separated, optional)")
+        exclude_tax_file = st.file_uploader(
+            "Or upload exclude txt", type=["txt"], key="tree_excl_file"
+        )
+        if exclude_tax_file is not None:
+            st.session_state["tree_excl_content"] = exclude_tax_file.getvalue().decode()
         prefix = st.text_input("Output Prefix", placeholder="e.g. myrun")
+        output_dir = st.text_input(
+            "Output Directory",
+            placeholder="e.g. /home/user/results (leave empty for current dir)",
+        )
 
     with col2:
         aln = st.selectbox("Alignment Tool", ["mafft", "einsi", "clustalo"])
         ml = st.selectbox("Tree Method", ["fasttree", "iqtree"])
-        cpu = st.text_input("Threads", value="32")
+        trimal_th = st.text_input("Set trimming threshold", value="0.01")
+        cpu = st.text_input("Threads", value="4")
         use_evalue = st.checkbox("Apply E-value cutoff")
         evalue = (
             st.number_input("E-value Cutoff", value=1e-5, format="%.1e")
@@ -217,13 +313,21 @@ elif choice == "Phylogenetic Tree":
         )
         no_ncbi = st.checkbox("Skip NCBI annotation (faster)", value=True)
 
-        # New Toggle for ETE4 Server
-        use_ete4 = st.checkbox(
-            "Start ETE4 Interactive Server (Alternative Viewer)", value=False
-        )
+        # --- INDEPENDENT CHECKBOXES ---
+        use_ete4 = st.checkbox("Start ETE4 Interactive Server", value=False)
         ete4_port = st.number_input("ETE4 Port", value=5001) if use_ete4 else 5001
 
+        render_static_ete = st.checkbox(
+            "Generate Static ETE4 Image (Custom Domains)", value=False
+        )
+
     if st.button("Run Full Tree Pipeline"):
+
+        st.session_state.pop("tree_ready", None)
+        st.session_state.pop("viewer_mode", None)
+        st.session_state.pop("ete4_port", None)
+        st.session_state.pop("output_dir", None)
+
         if not pfam or not prefix:
             st.warning(
                 "Please fill in at least one Pfam ID or HMM name and Output Prefix."
@@ -244,111 +348,237 @@ elif choice == "Phylogenetic Tree":
                 ml,
                 "--cpu",
                 cpu,
+                "--gt",
+                trimal_th,
             ]
-            if tax:
-                cmd += ["--taxids", tax.replace(" ", "")]
-            if exclude_tax:
-                cmd += ["--exclude_taxids", exclude_tax.replace(" ", "")]
+
+            if output_dir:
+                cmd += ["--output_dir", output_dir.strip()]
+                st.session_state["output_dir"] = output_dir.strip()
+
+            # tax
+            if (
+                "tree_tax_content" in st.session_state
+                and st.session_state["tree_tax_content"].strip()
+            ):
+                tax_str = ",".join(
+                    l.strip()
+                    for l in st.session_state["tree_tax_content"].splitlines()
+                    if l.strip()
+                )
+            elif tax:
+                tax_str = tax.replace(" ", "")
+            else:
+                tax_str = None
+            if tax_str:
+                cmd += ["--taxids", tax_str]
+                st.caption(
+                    f"Taxids loaded: {tax_str[:80]}{'...' if len(tax_str) > 80 else ''}"
+                )
+            else:
+                fa_path = (
+                    os.path.join(output_dir.strip(), f"{prefix}.fa")
+                    if output_dir
+                    else f"{prefix}.fa"
+                )
+                if os.path.isfile(fa_path):
+                    st.info(
+                        "No taxids provided — reusing cached sequence file from previous run."
+                    )
+                else:
+                    st.warning(
+                        "No taxids detected — fetching ALL taxa. This may be very slow."
+                    )
+
+            # exclude_tax
+            if (
+                "tree_excl_content" in st.session_state
+                and st.session_state["tree_excl_content"].strip()
+            ):
+                excl_str = ",".join(
+                    l.strip()
+                    for l in st.session_state["tree_excl_content"].splitlines()
+                    if l.strip()
+                )
+            elif exclude_tax:
+                excl_str = exclude_tax.replace(" ", "")
+            else:
+                excl_str = None
+            if excl_str:
+                cmd += ["--exclude_taxids", excl_str]
+
             if evalue is not None:
                 cmd += ["--evalue", str(evalue)]
             if no_ncbi:
                 cmd += ["--no_ncbi"]
 
-            # ── PATH A: USE ETE4 BACKGROUND SERVER ──
+            # Prevent Qt Crash
+            run_env = os.environ.copy()
+            run_env["QT_QPA_PLATFORM"] = "offscreen"
+
+            # -------- A: USE ETE4 BACKGROUND SERVER ---------
             if use_ete4:
                 cmd += ["--port", str(int(ete4_port))]
                 with st.spinner(
                     f"Preparing ETE4 on port {ete4_port}. Alignment & Tree building may take 1-2 minutes..."
                 ):
-
-                    # 1. Automatically kill any old zombie server holding this port
-                    # (This uses standard Linux commands to free the port)
                     os.system(f"fuser -k {ete4_port}/tcp >/dev/null 2>&1")
+                    proc = subprocess.Popen(cmd, env=run_env)
 
-                    # 2. Start the pipeline in the background
-                    proc = subprocess.Popen(cmd)
-
-                    # 3. Give it 30 seconds to run MAFFT/FastTree before showing the frame
-                    import time
-
-                    time.sleep(30)
+                    deadline = time.time() + 600
+                    interval = 5
+                    while time.time() < deadline:
+                        try:
+                            with socket.create_connection(
+                                ("localhost", int(ete4_port)), timeout=2
+                            ):
+                                break
+                        except OSError:
+                            time.sleep(interval)
+                    else:
+                        st.error(
+                            "ETE4 server did not start within 10 minutes. Check your terminal."
+                        )
+                        st.stop()
 
                 st.success(f"ETE4 Server launched! Bound to port {ete4_port}.")
                 st.info(
                     "If the frame below says 'Cannot connect', the alignment is still running! Just wait 30 seconds and click the blue (Try Again) button in the frame."
                 )
 
-                # Tell session state to show ETE4, not D3
                 st.session_state["tree_ready"] = True
                 st.session_state["tree_prefix"] = prefix
                 st.session_state["viewer_mode"] = "ete4"
                 st.session_state["ete4_port"] = ete4_port
 
-            # ── PATH B: USE D3 VIEWER (DEFAULT, NO SERVER) ──
-            else:
-                cmd += ["--no_explore"]  # Skip the ETE4 server block
-
+            # -------- B: USE ETE4 TO RENDER STATIC IMAGE ---------
+            elif render_static_ete:
+                cmd += ["--port", str(int(ete4_port))]
+                cmd += ["--render_ete_static"]
                 with st.spinner(
-                    "Building alignment and tree... Check your terminal for live progress!"
+                    "Generating static ETE image with domains displayed, please wait."
                 ):
                     try:
-                        subprocess.run(cmd, check=True)
+                        subprocess.run(cmd, check=True, env=run_env)
                     except subprocess.CalledProcessError as e:
                         st.error(
-                            f"Pipeline crashed (Exit status {e.returncode}). Check your terminal for the exact error message."
+                            f"Pipeline crashed (Exit status {e.returncode}). Check your terminal."
                         )
                         st.stop()
 
+                st.session_state["tree_ready"] = True
+                st.session_state["tree_prefix"] = prefix
+                st.session_state["viewer_mode"] = "ete4_static"
+
+            # -------- C: USE D3 VIEWER (DEFAULT, NO SERVER) --------
+            else:
+                cmd += ["--no_explore"]
+                with st.spinner(
+                    "Building alignment and tree... Check your terminal for live progress."
+                ):
+                    try:
+                        subprocess.run(cmd, check=True, env=run_env)
+                    except subprocess.CalledProcessError as e:
+                        st.error(
+                            f"Pipeline crashed (Exit status {e.returncode}). Check your terminal."
+                        )
+                        st.stop()
+
+                # --- DYNAMIC FILENAME RECONSTRUCTION BASED ON TRIMAL THRESHOLD ---
+                aln_ext = ".mft" if aln == "mafft" else f".{aln}"
+                trim_ext = f".gt{trimal_th.replace('.', '')}"
+
                 if ml == "fasttree":
-                    tree_file = f"{prefix}.mft.gt01.lg.fasttree"
+                    tree_file_base = f"{prefix}{aln_ext}{trim_ext}.lg.fasttree"
                 elif ml == "iqtree":
-                    tree_file = f"{prefix}.mft.gt01.treefile"
+                    tree_file_base = f"{prefix}{aln_ext}{trim_ext}.treefile"
 
-                if os.path.isfile(tree_file):
-                    with open(tree_file) as f:
+                tree_file_path = tree_file_base
+                if output_dir:
+                    tree_file_path = os.path.join(output_dir.strip(), tree_file_base)
+
+                if os.path.isfile(tree_file_path):
+                    with open(tree_file_path) as f:
                         st.session_state["tree_data"] = f.read()
-                    st.session_state["tree_prefix"] = prefix
 
-                    itol_colors_path = f"{tree_file}.itol_colors.txt"
+                    st.session_state["tree_prefix"] = prefix
+                    st.session_state["tree_method"] = ml
+                    st.session_state["final_tree_basename"] = (
+                        tree_file_base  # Save exact name
+                    )
+
+                    itol_colors_path = f"{tree_file_path}.itol_colors.txt"
                     if os.path.isfile(itol_colors_path):
                         with open(itol_colors_path) as f:
                             st.session_state["itol_data"] = f.read()
 
-                    # Tell session state to show D3, not ETE4
+                    itol_domains_path = f"{tree_file_path}.itol_domains.txt"
+                    if os.path.isfile(itol_domains_path):
+                        with open(itol_domains_path) as f:
+                            st.session_state["itol_domains"] = f.read()
+
                     st.session_state["tree_ready"] = True
                     st.session_state["viewer_mode"] = "d3"
-                    st.session_state["tree_method"] = ml
                 else:
-                    st.error("Pipeline finished but the tree file was not found.")
+                    st.error(
+                        f"Pipeline finished but expected file not found:\n`{tree_file_path}`"
+                    )
 
     # ==========================================================
     # Display the correct viewer based on what was just run
     # ==========================================================
     if st.session_state.get("tree_ready"):
         p = st.session_state["tree_prefix"]
+        out_dir = st.session_state.get("output_dir", "")
         st.markdown("---")
 
-        # --- SHOW ETE4 VIEWER ---
+        # -------- SHOW ETE4 INTERACTIVE SERVER --------
         if st.session_state.get("viewer_mode") == "ete4":
             st.subheader("ETE4 Interactive Explorer")
             port = st.session_state["ete4_port"]
             st.caption(f"Connected to ETE4 server on port {port}")
-            # Fix: Point the iframe to the actual server IP, not localhost!
-            components.iframe(
-                f"http://localhost:{port}", width=1200, height=800, scrolling=True
+            st.iframe(
+                f"http://localhost:{port}/static/gui.html?tree=tree-1",
+                width=1800,
+                height=1200,
             )
 
-        # --- SHOW D3 VIEWER ---
+        # -------- SHOW ETE4 STATIC IMAGE --------
+        elif st.session_state.get("viewer_mode") == "ete4_static":
+            st.subheader("Phylogeny & Domain Architecture (Static High-Res)")
+
+            expected_img_path = f"{p}_tree_domains.png"
+            if out_dir:
+                expected_img_path = os.path.join(out_dir, expected_img_path)
+
+            if os.path.isfile(expected_img_path):
+                st.image(expected_img_path, use_container_width=True)
+                with open(expected_img_path, "rb") as img_file:
+                    st.download_button(
+                        label="Download Motif Tree PNG",
+                        data=img_file.read(),
+                        file_name=os.path.basename(expected_img_path),
+                        mime="image/png",
+                        key="ete4_png_dl",
+                    )
+            else:
+                st.error(
+                    f"Image not found at {expected_img_path}. Check terminal for ETE4 rendering errors."
+                )
+
+        # -------- SHOW D3 VIEWER --------
         elif st.session_state.get("viewer_mode") == "d3":
             st.subheader("Interactive Tree Preview")
             st.caption(
                 "Scroll to zoom, click nodes to collapse/expand. Hover over leaves for details."
             )
 
-            if st.session_state.get("tree_method") == "fasttree":
-                itol_path = f"{p}.mft.gt01.lg.fasttree.itol_colors.txt"
-            else:
-                itol_path = f"{p}.mft.gt01.treefile.itol_colors.txt"
+            # Look up the exact dynamic name we calculated earlier
+            tree_file_base = st.session_state.get("final_tree_basename")
+            if out_dir:
+                tree_file_base = os.path.join(out_dir, tree_file_base)
+
+            itol_path = f"{tree_file_base}.itol_colors.txt"
 
             leaf_colors = None
             if os.path.isfile(itol_path):
@@ -361,10 +591,8 @@ elif choice == "Phylogenetic Tree":
                 height=800,
             )
 
-            # Revert back to components.html which safely sandboxes the JS
             components.html(tree_html, height=800, scrolling=True)
 
-            # ── Static PNG download ──────────────────────────────────
             if st.button("Render static PNG", key="tree_png_btn"):
                 with st.spinner("Rendering..."):
                     png_buf = viz.render_tree(st.session_state["tree_data"])
@@ -380,27 +608,41 @@ elif choice == "Phylogenetic Tree":
 
         st.markdown("---")
 
-        # ── Newick and iTOL downloads ────────────────────────────────────
-        st.caption("For publication figures, upload the Newick to iTOL:")
-        dl_col1, dl_col2 = st.columns(2)
-        with dl_col1:
-            if "tree_data" in st.session_state:
-                st.download_button(
-                    "Download Tree (Newick)",
-                    st.session_state["tree_data"],
-                    file_name=f"{p}.nwk",
-                    key="tree_nwk_dl",
-                )
-        with dl_col2:
-            if "itol_data" in st.session_state:
-                st.download_button(
-                    "Download iTOL Colors",
-                    st.session_state["itol_data"],
-                    file_name=f"{p}_itol_styles.txt",
-                    key="tree_itol_dl",
-                )
-        st.success("Done! Upload the .nwk file to https://itol.embl.de")
+        # -------------- Newick and iTOL downloads --------------
+        if st.session_state.get("viewer_mode") in ["d3", "ete4_static"]:
+            st.caption("For publication figures, upload the Newick to iTOL:")
+            dl_col1, dl_col2, dl_col3 = st.columns(3)
+            with dl_col1:
+                if "tree_data" in st.session_state:
+                    st.download_button(
+                        "Download Tree (Newick)",
+                        st.session_state["tree_data"],
+                        file_name=f"{p}.nwk",
+                        key="tree_nwk_dl",
+                    )
+            with dl_col2:
+                if "itol_data" in st.session_state:
+                    st.download_button(
+                        "Download iTOL Colors",
+                        st.session_state["itol_data"],
+                        file_name=f"{p}_itol_styles.txt",
+                        key="tree_itol_dl",
+                    )
+            with dl_col3:
+                if "itol_domains" in st.session_state:
+                    st.download_button(
+                        "Download iTOL Domains",
+                        st.session_state["itol_domains"],
+                        file_name=f"{p}_itol_domains.txt",
+                        key="domains_itol_dl",
+                    )
+            st.success("Done! Upload the .nwk file to https://itol.embl.de")
 
+# ==========================================================================================================
+
+#                                          GO -> DOMAIN PROFILES TAB
+
+# ==========================================================================================================
 
 elif choice == "GO → Domain Profiles":
     st.header("GO Term → HMM Domain Profiles")
@@ -427,6 +669,12 @@ elif choice == "GO → Domain Profiles":
         else:
             st.warning("No domain profiles found for this GO term.")
 
+
+# ==========================================================================================================
+
+#                                       PRESENCE ABSENCE & DRILL DOWN TAB
+
+# ==========================================================================================================
 
 elif choice == "Presence/Absence & Drill-down":
     st.header("Presence / Absence Matrix + Functional Drill-down")
@@ -473,6 +721,11 @@ elif choice == "Presence/Absence & Drill-down":
             placeholder="e.g. 9606, 10090, 7227",
             key="pa_tax_input",
         )
+        pa_tax_file = st.file_uploader(
+            "Or upload TXT (one ID per line)", type=["txt"], key="pa_tax_file"
+        )
+        if pa_tax_file is not None:
+            st.session_state["pa_tax_content"] = pa_tax_file.getvalue().decode()
 
     with col2:
         pa_use_evalue = st.checkbox("Apply E-value cutoff", key="pa_use_evalue")
@@ -485,7 +738,7 @@ elif choice == "Presence/Absence & Drill-down":
         )
 
     # -----------------------------------------------------------------
-    # Build Matrix button
+    #                       Build Matrix button
     # -----------------------------------------------------------------
     # When clicked, we run the matrix query and store the result in
     # session_state so it survives subsequent interactions (drill-down
@@ -496,11 +749,19 @@ elif choice == "Presence/Absence & Drill-down":
             st.warning("Please enter at least one Pfam name or accession.")
         else:
             pfam_queries = [q.strip() for q in pa_pfam_input.split(",") if q.strip()]
-            tax_ids = (
-                [int(t.strip()) for t in pa_tax_input.split(",") if t.strip()]
-                if pa_tax_input.strip()
-                else None
-            )
+            if (
+                "pa_tax_content" in st.session_state
+                and st.session_state["pa_tax_content"].strip()
+            ):
+                tax_ids = [
+                    int(l.strip())
+                    for l in st.session_state["pa_tax_content"].splitlines()
+                    if l.strip()
+                ]
+            elif pa_tax_input.strip():
+                tax_ids = [int(t.strip()) for t in pa_tax_input.split(",") if t.strip()]
+            else:
+                tax_ids = None
 
             with st.spinner("Querying database..."):
                 rows = uni.fetch_presence_absence_matrix(
@@ -536,9 +797,8 @@ elif choice == "Presence/Absence & Drill-down":
                 f"Matrix built — {len(rows)} (taxon × profile) combinations found."
             )
 
-            # ── Build a human-readable taxon label ──────────────────
-            # Prefer "9606 · Homo sapiens" over bare "9606" where the
-            # proteomes table provided a scientific name.
+            # -------------- Build a human-readable taxon label --------------
+
             def taxon_label(taxon_id, scientific_name):
                 if scientific_name:
                     return f"{taxon_id} · {scientific_name}"
@@ -551,7 +811,7 @@ elif choice == "Presence/Absence & Drill-down":
                 lambda r: taxon_label(r["taxon_id"], r.get("scientific_name")), axis=1
             )
 
-            # ── Pivot into matrix form ───────────────────────────────
+            # -------------- Pivot into matrix  --------------
             # Rows = organisms, columns = HMM profiles, values = protein counts.
             # fill_value=0 makes absent (taxon, profile) pairs explicit zeros
             # rather than NaN — important for the color gradient.
@@ -565,7 +825,7 @@ elif choice == "Presence/Absence & Drill-down":
             matrix_df.index.name = "Organism (taxon_id · name)"
             matrix_df.columns.name = None
 
-            # ── Color the matrix ────────────────────────────────────
+            # -------------- Color the matrix --------------
             # background_gradient applies a colour scale across the
             # entire table (axis=None), so we compare all cells together.
             # Zeros stay near-white; high counts go dark orange/red.
@@ -588,11 +848,11 @@ elif choice == "Presence/Absence & Drill-down":
                 file_name="presence_absence_matrix.csv",
             )
 
-            # ──--------------- Clustered heatmap ────────────────────────────────────────
+            # ──--------------- Clustered heatmap --------------
             # The clustermap below reorders rows and columns by similarity,
             #  useful when you have many organisms/profiles and
             # want to see which groups of organisms share a profile complement.
-            # We offer it as an on-demand button (not automatic) because
+            # on-demand button (not automatic) because
             # seaborn clustermap takes a moment on large matrices and we
             # don't want it blocking the page on every rerun.
             if matrix_df.shape[0] >= 2 and matrix_df.shape[1] >= 1:
@@ -620,9 +880,6 @@ elif choice == "Presence/Absence & Drill-down":
             # Two selectboxes (taxon + profile) populated from
             # the matrix. The user picks the cell they want to investigate,
             # then clicks "Drill Down".
-            #
-            # We build the options from df_flat, not from matrix_df, because
-            # df_flat has the taxon_id integers we need for the DB query.
             # =============================================================
             st.markdown("---")
             st.subheader("Step 2 — Drill Down into a Cell")
@@ -676,9 +933,7 @@ elif choice == "Presence/Absence & Drill-down":
                     with st.spinner("Fetching accessions and computing drill-down..."):
 
                         # ── Bridge query: get accessions for this cell ──
-                        # This is the get_accessions_for_cell() call.
-                        # We get the list of proteins, then extract just
-                        # the accession strings for the two step-2 methods.
+
                         cell_records = uni.fetch_accessions_for_cell(
                             pa_ver,
                             selected_profile,
@@ -688,12 +943,9 @@ elif choice == "Presence/Absence & Drill-down":
                         )
                         accessions = [r["accession"] for r in cell_records]
 
-                        # ── Path A: sub-profile hits ────────────────────
+                        # -------------- Path A: sub-profile hits --------------
                         # We exclude the original query profile from the
-                        # results so it doesn't dominate the view — the
-                        # user already knows it's there (that's why they
-                        # clicked the cell). The interesting signal is
-                        # what else these proteins carry.
+                        # results so it doesn't dominate the view
                         subprofile_rows = uni.fetch_subprofile_hits(
                             pa_ver,
                             accessions,
@@ -702,7 +954,7 @@ elif choice == "Presence/Absence & Drill-down":
                             db_config=config,
                         )
 
-                        # ── Path B: domain architectures ────────────────
+                        # -------------- Path B: domain architectures --------------
                         arch_rows = uni.fetch_domain_architectures(
                             pa_ver,
                             accessions,
@@ -725,7 +977,7 @@ elif choice == "Presence/Absence & Drill-down":
     # =================================================================
     # SECTION 4 — Display drill-down results (if they exist)
     # =================================================================
-    # Again we read from session_state, not local variables, so the
+    # Again read from session_state, not local variables, so the
     # results stay visible even if the user later changes a selectbox
     # without clicking "Drill Down" again.
     # =================================================================
@@ -746,7 +998,7 @@ elif choice == "Presence/Absence & Drill-down":
             ]
         )
 
-        # ── Tab A: sub-profile enrichment ───────────────────────────────
+        # -------------- Tab A: sub-profile enrichment --------------
         with tab_a:
             st.caption(
                 "All HMM profiles found on these proteins, ranked by how many "
@@ -788,7 +1040,7 @@ elif choice == "Presence/Absence & Drill-down":
             else:
                 st.info("No additional profiles found on these proteins.")
 
-        # ── Tab B: domain architectures ─────────────────────────────────
+        # -------------- Tab B: domain architectures --------------
         with tab_b:
             st.caption(
                 "Domain architecture patterns across these proteins, ranked by "
@@ -828,9 +1080,9 @@ elif choice == "Presence/Absence & Drill-down":
                     file_name=f"architectures_{ctx['profile']}_{ctx['taxon_label'].split(' ')[0]}.csv",
                 )
 
-                # ── Architecture diagram for a selected pattern ─────────────
+                # -------------- Architecture diagram for a selected pattern --------------
             # Tab B already shows a ranked table of architecture patterns.
-            # Here we let the user pick one pattern and visualize the
+            # Functionality for the user to pick one pattern and visualize the
             # example proteins from that pattern as a domain diagram.
             # We can only draw proteins for which we have domain records,
             # so we do a small targeted DB call using the example_accessions
