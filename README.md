@@ -141,7 +141,7 @@ One liner examples to call from CLI:
 python tree_from_db.py \
   --pfam PF00041 \
   --version 2026_01 \
-  --prefix /home/amarougka/results/myrun \
+  --prefix /home/user/results/myrun \
   --taxids 9606,10090,7227,7955,6239 \
   --aln mafft \
   --ml fasttree \
@@ -157,7 +157,7 @@ python tree_from_db.py \
 python tree_from_db.py \
   --pfam PF00041 \
   --version 2026_01 \
-  --prefix /home/amarougka/results/myrun \
+  --prefix /home/user/results/myrun \
   --taxids 9606,10090,7227,7955,6239 \
   --aln mafft \
   --ml fasttree \
@@ -175,7 +175,7 @@ python tree_from_db.py \
 python tree_from_db.py \
   --pfam PF00041 \
   --version 2026_01 \
-  --prefix /home/amarougka/results/myrun \
+  --prefix /home/user/results/myrun \
   --taxids 9606,10090,7227,7955,6239 \
   --aln mafft \
   --ml fasttree \
@@ -192,7 +192,7 @@ python tree_from_db.py \
 python tree_from_db.py \
   --pfam PF00041 \
   --version 2026_01 \
-  --prefix /home/amarougka/results/myrun \
+  --prefix /home/user/results/myrun \
   --aln einsi \
   --ml iqtree \
   --gt 0.01 \
@@ -207,7 +207,7 @@ python tree_from_db.py \
 python tree_from_db.py \
   --pfam PF00041 \
   --version 2026_01 \
-  --prefix /home/amarougka/results/myrun \
+  --prefix /home/user/results/myrun \
   --exclude_taxids 9615,9913 \
   --aln mafft \
   --ml fasttree \
