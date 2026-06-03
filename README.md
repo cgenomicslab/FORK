@@ -130,7 +130,7 @@ Called by the GUI as a subprocess. Fetches sequences from the DB, aligns them, a
 | `--version` | UniProt release (must match DB) | required |
 | `--prefix` | Full path + run name for all output files | required |
 | `--taxids` | NCBI taxon IDs to include, comma-separated or path to txt file | all taxa |
-| `--exclude_taxids` | NCBI taxon IDs to exclude, comma-separated | none |
+| `--exclude_taxids` | NCBI taxon IDs to exclude, comma-separated or txt file | none |
 | `--aln` | Alignment tool: `mafft`, `einsi`, `clustalo` | `mafft` |
 | `--ml` | Tree method: `fasttree`, `iqtree` | `fasttree` |
 | `--gt` | TrimAl gap threshold | `0.01` |
