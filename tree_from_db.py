@@ -78,6 +78,12 @@ def get_seqs(fastafile):
         name2seq[head] = seq
     return name2seq
 
+
+# Color generation 
+def _domain_color(name):
+    h = int(hashlib.md5(name.encode()).hexdigest()[:6], 16)
+    return "#{:02x}{:02x}{:02x}".format((h >> 16) & 0xFF, (h >> 8) & 0xFF, h & 0xFF)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Uniprot/Pfam-based protein family evolution analysis')
     parser.add_argument('--pfam', required=True, type=str)
@@ -231,8 +237,7 @@ if __name__ == '__main__':
             except Exception as e:
                 pass
 
-        distinct_palette = ["#e6194B", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4", "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990", "#dcbeff", "#9A6324", "#fffac8", "#800000", "#aaffc3", "#808000", "#ffd8b1", "#000075", "#a9a9a9"]
-        auto_colormap = {taxid: distinct_palette[i % len(distinct_palette)] for i, taxid in enumerate(sorted(list(unique_taxids)))}
+        auto_colormap = {taxid: _domain_color(taxid) for taxid in sorted(unique_taxids)}
 
         with open(itol_file, "w") as f:
             f.write("DATASET_COLORSTRIP\nSEPARATOR TAB\nDATASET_LABEL\tTaxon Color Map\nCOLOR\t#ff0000\nDATA\n")
@@ -257,16 +262,14 @@ if __name__ == '__main__':
     
     def generate_itol_domains(filename_tree, domain_dict, name2seq):
         itol_file = filename_tree + ".itol_domains.txt"
-        palette = ["#e6194B","#3cb44b","#4363d8","#f58231","#911eb4",
-                "#42d4f4","#f032e6","#469990","#9A6324","#800000"]
+
         names = sorted({d["hmm_name"] for hits in domain_dict.values() for d in hits})
-        color_of = {n: palette[i % len(palette)] for i, n in enumerate(names)}
 
         with open(itol_file, "w") as f:
             f.write("DATASET_DOMAINS\nSEPARATOR TAB\nDATASET_LABEL\tPfam domains\nCOLOR\t#000000\n")
             f.write("LEGEND_TITLE\tDomains\n")
             f.write("LEGEND_SHAPES\t" + "\t".join(["RE"] * len(names)) + "\n")
-            f.write("LEGEND_COLORS\t" + "\t".join(color_of[n] for n in names) + "\n")
+            f.write("LEGEND_COLORS\t" + "\t".join(_domain_color(n) for n in names) + "\n")
             f.write("LEGEND_LABELS\t" + "\t".join(names) + "\n")
             f.write("DATA\n")
             for seqid, seq in name2seq.items():
@@ -276,7 +279,7 @@ if __name__ == '__main__':
                     continue
                 fields = [seqid, str(len(seq))]
                 for d in hits:
-                    fields.append(f"RE|{d['ali_from']}|{d['ali_to']}|{color_of[d['hmm_name']]}|{d['hmm_name']}")
+                    fields.append(f"RE|{d['ali_from']}|{d['ali_to']}|{_domain_color(d['hmm_name'])}|{d['hmm_name']}")
                 f.write("\t".join(fields) + "\n")
 
 # ===========================================================================================================================
@@ -316,10 +319,6 @@ if __name__ == '__main__':
                 generate_itol_domains(filename_tree, domain_dict, get_seqs(filename_fasta))
                 print(f"INFO--iTOL domains file written: {filename_tree}.itol_domains.txt")
 
-            # Color generation 
-            def _domain_color(name):
-                h = int(hashlib.md5(name.encode()).hexdigest()[:6], 16)
-                return "#{:02x}{:02x}{:02x}".format((h >> 16) & 0xFF, (h >> 8) & 0xFF, h & 0xFF)
             
             
             
