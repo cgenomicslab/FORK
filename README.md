@@ -30,22 +30,27 @@ The **Presence/Absence** tab implements a two-tier workflow:
 ## Repository structure
 
 ```
-uniprot-lab-manager/
-│
-├── README.md
-├── requirements.txt
-├── .gitignore
-│
-├── retrieval_script_gui.py        # Main entry point — run this with Streamlit
-├── get_reference_uniprot_set_lib.py  # Backend retrieval library
-├── tree_from_db.py                # Alignment + tree pipeline (MAFFT/FastTree/IQ-TREE)
-├── viz_utils.py                   # Visualization: domain architecture, static tree, heatmap
-├── interactive_tree_component.py  # D3-based interactive tree (HTML/JS)
-│
-└── setup/                         # One-time setup scripts (run by DB admin only)
+
+uniprot-lab-manager
+    ├── .env.example
+    ├── .gitignore
+    ├── API_REFERENCE.md
+    ├── get_reference_uniprot_set_lib.py  # Backend retrieval library
+    ├── homepage.py                       # Main entry point — run this with Streamlit
+    ├── interactive_tree_component.py     # D3-based interactive tree (HTML/JS)
+    ├── logo.png
+    ├── pages
+    │   └── 1_UniProt_Lab_Manager.py
     ├── README.md
-    ├── uniprot_sync_v7.py         # Builds the local UniProt reference proteomes DB
-    └── pyhmmer_hmmsearch.py      # Runs Pfam-A HMM search across the DB (PyHMMER)
+    ├── retrieval_script_gui.py
+    ├── setup                             # One-time setup scripts (run by DB admin only)
+    │   ├── pyhmmer_hmmsearch.py          # Runs Pfam-A HMM search across the DB (PyHMMER)
+    │   ├── README.md
+    │   └── uniprot_sync_v7.py            # Builds the local UniProt reference proteomes DB
+    ├── tree_from_db.py                   # Alignment + tree pipeline (MAFFT/FastTree/IQ-TREE)
+    ├── uniprot-lab-manager.yml       
+    └── viz_utils.py
+
 ```
 
 ---
@@ -90,7 +95,7 @@ Alternatively, fill in the **DB Config** panel in the Streamlit sidebar at runti
 ### 4. Run the app
 
 ```bash
-python -m streamlit run retrieval_script_gui.py
+python -m streamlit run homepage.py
 ```
 
 Then open `http://localhost:8501` (or the network URL shown in the terminal).
