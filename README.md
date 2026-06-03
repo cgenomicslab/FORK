@@ -124,16 +124,24 @@ Key methods inside `UniProtRetriever`:
 ### `tree_from_db.py`
 Called by the GUI as a subprocess. Fetches sequences from the DB, aligns them, and builds a phylogenetic tree.
 
-```bash
-python tree_from_db.py \
-  --pfam PF00046,Homeodomain \
-  --version 2026_01 \
-  --taxids 9606,10090,7227 \
-  --prefix myrun \
-  --aln mafft \
-  --ml fasttree \
-  --cpu 32
-```
+| Argument | Description | Default |
+|---|---|---|
+| `--pfam` | Pfam ID(s) or HMM name(s), comma-separated | required |
+| `--version` | UniProt release (must match DB) | required |
+| `--prefix` | Full path + run name for all output files | required |
+| `--taxids` | NCBI taxon IDs to include, comma-separated or path to txt file | all taxa |
+| `--exclude_taxids` | NCBI taxon IDs to exclude, comma-separated | none |
+| `--aln` | Alignment tool: `mafft`, `einsi`, `clustalo` | `mafft` |
+| `--ml` | Tree method: `fasttree`, `iqtree` | `fasttree` |
+| `--gt` | TrimAl gap threshold | `0.01` |
+| `--cpu` | Threads for alignment and tree building | `4` |
+| `--evalue` | E-value cutoff for HMM hits | none |
+| `--no_ncbi` | Skip NCBI taxonomy annotation (faster) | off |
+| `--no_explore` | Build tree files only, no viewer | off |
+| `--render_ete_static` | Render static PNG with domain shapes using ETE4 | off |
+| `--static_layers` | Layers to include in static PNG: `names,domains,colors,gene` | all |
+| `--port` | Port for ETE4 interactive server | `5001` |
+| `--output_dir` | Directory for all output files (alternative to full path in `--prefix`) | none |
 
 One liner examples to call from CLI:
 1. Build tree only (no viewer, fastest)
@@ -218,7 +226,7 @@ python tree_from_db.py \
   --no_explore
 ```
 
-Outputs: `.fa`, `.mft`, `.mft.gt01`, `.mft.gt01.lg.fasttree`, `.itol_colors.txt`
+Outputs: `.fa`, `.mft`, `.mft.gt01`, `.mft.gt01.lg.fasttree`, `.itol_colors.txt`, `.itol_domains.txt`
 
 Use `--no_explore` to skip the ETE4 server (D3 viewer mode in GUI).
 
@@ -291,7 +299,7 @@ Want to use our retrieval backend in your own Python scripts or Jupyter notebook
 
 ## Notes
 
-- Output files (`.fa`, `.mft`, `.nwk`, etc.) are generated in the working directory and excluded from version control via `.gitignore`.
+- Output files (`.fa`, `.mft`, `.nwk`, `_tree_domains.png`, `.itol_colors.txt`, `.itol_domains.txt`) are generated at the path specified by `--prefix` and excluded from version control via `.gitignore`.
 - The `.env` file contains credentials and must never be committed.
-- For publication-quality trees, download the `.nwk` file and upload to [iTOL](https://itol.embl.de) with the `.itol_colors.txt` color strip file.
+- For better visualizing trees, download the `.nwk` file and upload to iTOL (https://itol.embl.de) with the `.itol_colors.txt` taxon colour strip and `.itol_domains.txt` domain annotation files.
 - ETE4 interactive explorer requires port access (default 5001). The D3 viewer (default mode) has no server dependency.
