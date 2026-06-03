@@ -135,6 +135,89 @@ python tree_from_db.py \
   --cpu 32
 ```
 
+One liner examples to call from CLI:
+1. Build tree only (no viewer, fastest)
+```bash
+python tree_from_db.py \
+  --pfam PF00041 \
+  --version 2026_01 \
+  --prefix /home/amarougka/results/myrun \
+  --taxids 9606,10090,7227,7955,6239 \
+  --aln mafft \
+  --ml fasttree \
+  --gt 0.01 \
+  --cpu 8 \
+  --evalue 1e-5 \
+  --no_ncbi \
+  --no_explore
+```
+
+2. Static image with domain architectures
+```bash
+python tree_from_db.py \
+  --pfam PF00041 \
+  --version 2026_01 \
+  --prefix /home/amarougka/results/myrun \
+  --taxids 9606,10090,7227,7955,6239 \
+  --aln mafft \
+  --ml fasttree \
+  --gt 0.01 \
+  --cpu 8 \
+  --evalue 1e-5 \
+  --no_ncbi \
+  --render_ete_static \
+  --static_layers names,domains,colors,gene
+```
+
+3. Live interactive browser (ETE4) (if run on the server needs ssh -L 5001:localhost:5001 user@server)
+
+```bash
+python tree_from_db.py \
+  --pfam PF00041 \
+  --version 2026_01 \
+  --prefix /home/amarougka/results/myrun \
+  --taxids 9606,10090,7227,7955,6239 \
+  --aln mafft \
+  --ml fasttree \
+  --gt 0.01 \
+  --cpu 8 \
+  --evalue 1e-5 \
+  --no_ncbi \
+  --port 5001
+```
+
+4. Reuse cached sequences (skip DB query, change aligner or tree method)
+
+```bash
+python tree_from_db.py \
+  --pfam PF00041 \
+  --version 2026_01 \
+  --prefix /home/amarougka/results/myrun \
+  --aln einsi \
+  --ml iqtree \
+  --gt 0.01 \
+  --cpu 8 \
+  --no_ncbi \
+  --no_explore
+```
+
+5. Exclude taxa
+
+```bash
+python tree_from_db.py \
+  --pfam PF00041 \
+  --version 2026_01 \
+  --prefix /home/amarougka/results/myrun \
+  --exclude_taxids 9615,9913 \
+  --aln mafft \
+  --ml fasttree \
+  --gt 0.01 \
+  --cpu 8 \
+  --evalue 1e-5 \
+  --no_ncbi \
+  --no_explore
+```
+
 Outputs: `.fa`, `.mft`, `.mft.gt01`, `.mft.gt01.lg.fasttree`, `.itol_colors.txt`
 
 Use `--no_explore` to skip the ETE4 server (D3 viewer mode in GUI).
