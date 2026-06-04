@@ -11,7 +11,7 @@ import streamlit.components.v1 as components
 import interactive_tree_component as itc
 
 from PIL import Image
-Image.MAX_IMAGE_PIXELS = None
+Image.MAX_IMAGE_PIXELS = None # to avoid too many pixels error from the ete tree display
 
 st.set_page_config(page_title="UniProt Lab Manager", layout="wide")
 
@@ -1059,16 +1059,21 @@ elif choice == "Presence/Absence & Drill-down":
 # ==========================================================================================================
 
 elif choice == "Extract Downloaded Branch":
-    st.header("Extract Accessions from Downloaded Branch")
+    st.header("Extract Accessions & Sequences from Downloaded Branch")
     st.markdown("""
     1. In the ETE4 Interactive Viewer, right-click the root of the clade you want.
     2. Click **"Download branch as newick"**.
-    3. Upload that specific file below to extract all its accessions.
+    3. Upload that specific file below to extract its accessions and fetch their sequences.
     """)
 
-    uploaded_branch = st.file_uploader("Upload Branch Newick (.nwk, .nw)", type=["nwk", "nw", "txt", "tree"])
+    col1, col2 = st.columns(2)
+    with col1:
+        uploaded_branch = st.file_uploader("Upload Branch (.nwk, .nw, .tree)", type=["nwk", "nw", "txt", "tree"])
+    with col2:
+        # Version to query the database for the sequences
+        ver = st.text_input("UniProt Version", value="2026_01", key="branch_ver")
 
-    if uploaded_branch and st.button("Extract Accessions"):
+    if uploaded_branch and st.button("Extract Data"):
         import tempfile
         import os
         from ete4 import PhyloTree
@@ -1090,18 +1095,49 @@ elif choice == "Extract Downloaded Branch":
                 extracted_accs.append(acc)
                 
             if extracted_accs:
-                st.success(f"Successfully extracted {len(extracted_accs)} accessions!")
+                st.success(f"Successfully extracted {len(extracted_accs)} accessions from the tree!")
                 
-                txt_output = "\n".join(sorted(extracted_accs))
+                with st.spinner("Fetching sequences from the database..."):
+                    # Query the DB for the full protein records
+                    records = uni.fetch_sequences_by_accession(ver, extracted_accs, db_config=config)
                 
-                st.download_button(
-                    label="Download Accessions TXT",
-                    data=txt_output,
-                    file_name="branch_accessions.txt"
-                )
-                
-                with st.expander("Preview Extracted Accessions"):
-                    st.text(txt_output)
+                if records:
+                    st.success(f"Retrieved {len(records)} sequences from the database!")
+                    
+                    # Convert records to a FASTA string
+                    with uni.UniProtRetriever(config) as db:
+                        fasta_str = db.to_fasta_string(records)
+                        
+                    txt_output = "\n".join(sorted(extracted_accs))
+
+                    # Provide download buttons for both formats
+                    dl_col1, dl_col2 = st.columns(2)
+                    with dl_col1:
+                        st.download_button(
+                            label="Download Accessions (.txt)",
+                            data=txt_output,
+                            file_name="branch_accessions.txt"
+                        )
+                    with dl_col2:
+                        st.download_button(
+                            label="Download Sequences (.fasta)",
+                            data=fasta_str,
+                            file_name="branch_sequences.fasta"
+                        )
+                        
+                    with st.expander("Preview FASTA"):
+                        # Just show the first 1500 characters so it doesn't lag the browser
+                        st.text(fasta_str[:1500] + ("\n... [truncated]" if len(fasta_str) > 1500 else ""))
+                else:
+                    st.warning("Could not find sequences for these accessions in the database. Double-check your UniProt Version.")
+                    # Still allow them to download the accessions text file even if the DB lookup fails
+                    txt_output = "\n".join(sorted(extracted_accs))
+                    st.download_button(
+                        label="Download Accessions (.txt)",
+                        data=txt_output,
+                        file_name="branch_accessions.txt"
+                    )
+
             else:
                 st.warning("No leaves found in the uploaded branch.")
                 
