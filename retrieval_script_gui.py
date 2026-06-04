@@ -42,6 +42,7 @@ menu = [
     "Phylogenetic Tree",
     "GO → Domain Profiles",
     "Presence/Absence & Drill-down",
+    "Extract Downloaded Branch"
 ]
 choice = st.selectbox("Select Functionality", menu)
 
@@ -1050,3 +1051,63 @@ elif choice == "Presence/Absence & Drill-down":
 
             else:
                 st.info("No domain architecture data found for these proteins.")
+
+# ==========================================================================================================
+
+#                                    EXTRACT DOWNLOADED BRANCH TAB
+
+# ==========================================================================================================
+
+elif choice == "Extract Downloaded Branch":
+    st.header("Extract Accessions from Downloaded Branch")
+    st.markdown("""
+    1. In the ETE4 Interactive Viewer, right-click the root of the clade you want.
+    2. Click **"Download branch as newick"**.
+    3. Upload that specific file below to extract all its accessions.
+    """)
+
+    uploaded_branch = st.file_uploader("Upload Branch Newick (.nwk, .nw)", type=["nwk", "nw", "txt", "tree"])
+
+    if uploaded_branch and st.button("Extract Accessions"):
+        import tempfile
+        import os
+        from ete4 import PhyloTree
+
+        # Streamlit file uploaders return bytes -> save to a temp file for ETE4
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".nwk") as tmp:
+            tmp.write(uploaded_branch.getvalue())
+            tmp_path = tmp.name
+
+        try:
+            t = PhyloTree(tmp_path)
+            extracted_accs = []
+            
+            # Grab every leaf from the branch
+            for leaf in t.leaves():
+                # Clean up the name ("taxid.accession" format)
+                name_parts = leaf.name.split(".")
+                acc = name_parts[1] if len(name_parts) > 1 else leaf.name
+                extracted_accs.append(acc)
+                
+            if extracted_accs:
+                st.success(f"Successfully extracted {len(extracted_accs)} accessions!")
+                
+                txt_output = "\n".join(sorted(extracted_accs))
+                
+                st.download_button(
+                    label="Download Accessions TXT",
+                    data=txt_output,
+                    file_name="branch_accessions.txt"
+                )
+                
+                with st.expander("Preview Extracted Accessions"):
+                    st.text(txt_output)
+            else:
+                st.warning("No leaves found in the uploaded branch.")
+                
+        except Exception as e:
+            st.error(f"Error parsing branch file: {e}")
+        finally:
+            # Clean up the temporary file
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
