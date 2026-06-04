@@ -20,10 +20,18 @@ The tool provides 8 functional tabs:
 | **Phylogenetic Tree** | Input HMM names/Pfam IDs → alignment → tree → interactive D3 viewer or ETE4 explorer |
 | **GO → Domain Profiles** | For a GO term, return all HMM profiles found in annotated proteins |
 | **Presence/Absence & Drill-down** | Cross-table of taxa × Pfam profiles with counts, clustered heatmap, and two-step drill-down into enzyme-level resolution |
+| **Extract Downloaded Branch** | After selecting a branch of interest and downloading it as nwk , the user can load the branch file in this tab and extract the accessions |
+
 
 The **Presence/Absence** tab implements a two-tier workflow:
 - **Step 1**: Detect presence/absence of a broad Pfam profile across organisms (e.g. all decarboxylases in Euk/Bact/Arch)
 - **Step 2**: Drill into a cell → sub-profile enrichment (TIGRFAM, specific Pfams) or domain architecture co-occurrence patterns → identifies specific enzymes (e.g. Histamine DC vs Tyramine DC vs Dopamine DC)
+
+About the **Extract Downloaded Branch** tab: 
+- **Step 1**: In the ETE4 Interactive Viewer, right-click the root of the clade you want.
+- **Step 2**: Click 'Download branch as newick'.
+- **Step 3**: Upload the file in the tab to extract all accessions in selected branch, and use for downstream analysis.
+
 
 ---
 
