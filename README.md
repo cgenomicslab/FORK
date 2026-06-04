@@ -20,7 +20,7 @@ The tool provides 8 functional tabs:
 | **Phylogenetic Tree** | Input HMM names/Pfam IDs → alignment → tree → interactive D3 viewer or ETE4 explorer |
 | **GO → Domain Profiles** | For a GO term, return all HMM profiles found in annotated proteins |
 | **Presence/Absence & Drill-down** | Cross-table of taxa × Pfam profiles with counts, clustered heatmap, and two-step drill-down into enzyme-level resolution |
-| **Extract Downloaded Branch** | After selecting a branch of interest and downloading it as nwk , the user can load the branch file in this tab and extract the accessions |
+| **Extract Downloaded Branch** | After selecting a branch of interest and downloading it as nwk , the user can load the branch file in this tab and extract the accessions and the corresponding protein sequences from the local DB|
 
 
 The **Presence/Absence** tab implements a two-tier workflow:
