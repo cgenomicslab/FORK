@@ -19,8 +19,10 @@ from collections import defaultdict
 
 import matplotlib
 
-matplotlib.use("Agg")  # Non-interactive backend 
-# "Agg" renders to an in-memory buffer instead of a screen window. Required in server/headless environments (Streamlit running in server)
+matplotlib.use("Agg")  # Non-interactive backend — must come before pyplot import.
+# "Agg" renders to an in-memory buffer instead of a screen
+# window. This is required in server/headless environments
+# like the lab server running Streamlit.
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
@@ -589,8 +591,17 @@ def draw_highres_profile_heatmap(
         ]
 
     # ---------------- Figure size ----------------
+
+    max_label_len = max(
+        (
+            len(str(tx)) + len(str(taxon_names.get(tx, ""))) + 2
+            for tx in matrix_df.index
+        ),
+        default=10,
+    )
+    label_extra = max(0, (max_label_len - 20) * 0.07)
     if figsize is None:
-        fig_width = max(7, n_cols * 0.55 + 4)
+        fig_width = max(9, n_cols * 0.55 + 4 + label_extra)
         fig_height = max(4, n_rows * 0.45 + 2)
     else:
         fig_width, fig_height = figsize
@@ -652,17 +663,18 @@ def draw_highres_profile_heatmap(
     # Title
     g.fig.suptitle(title, y=1.01, fontsize=11, fontweight="bold")
 
-    # Pfam legend (if we have col_colors)
+    # Pfam legend
     if pfam_color_map:
         handles = [
             mpatches.Patch(color=color, label=pfam)
             for pfam, color in pfam_color_map.items()
         ]
-        g.ax_heatmap.legend(
+        g.fig.legend(
             handles=handles,
             title="Pfam",
-            bbox_to_anchor=(1.02, 1.0),
-            loc="upper left",
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.04),
+            ncol=len(pfam_color_map),
             fontsize=8,
             title_fontsize=9,
             frameon=False,

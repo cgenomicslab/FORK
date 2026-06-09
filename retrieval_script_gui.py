@@ -1430,6 +1430,10 @@ elif choice == "High-Resolution Phylogenetic Profile":
                 st.session_state["hrp_build_version"] = version
                 st.session_state["hrp_build_taxids"] = taxids
                 st.rerun()
+                st.session_state["hrp_aln"] = aln
+                st.session_state["hrp_ml"] = ml
+                st.session_state["hrp_gt"] = gt
+                st.session_state["hrp_cpu"] = int(cpu)
 
     # -------------------------------------------------------------
     # SECTION 2: Tree-build summary
@@ -1599,14 +1603,183 @@ elif choice == "High-Resolution Phylogenetic Profile":
                     try:
                         with open(r["tree_path"]) as fh:
                             nwk_str = fh.read()
-                        if n_leaves <= 100:
-                            st.image(viz.render_tree(nwk_str), use_container_width=True)
-                        else:
-                            st.info(
-                                f"Tree has {n_leaves} leaves — too many to render "
-                                "inline. Download the Newick and inspect in iTOL "
-                                "or the ETE4 explorer."
+
+                        preview_mode = st.radio(
+                            "Display mode",
+                            [
+                                "Static PNG (Bio.Phylo)",
+                                "Interactive D3 (inline)",
+                                "ETE4 smartview (server)",
+                            ],
+                            horizontal=True,
+                            key=f"hrp_preview_mode_{pfam}",
+                        )
+
+                        # -------------- Mode 1: static PNG, current behavior --------------
+                        if preview_mode == "Static PNG (Bio.Phylo)":
+                            if n_leaves <= 100:
+                                st.image(
+                                    viz.render_tree(nwk_str), use_container_width=True
+                                )
+                            else:
+                                st.info(
+                                    f"Tree has {n_leaves} leaves — too many for a static PNG. "
+                                    "Switch to **Interactive D3** or **ETE4 smartview** above."
+                                )
+
+                        # -------------- Mode 2: D3 interactive, inline in Streamlit --------------
+                        elif preview_mode == "Interactive D3 (inline)":
+                            import interactive_tree_component as itc
+
+                            html = itc.build_tree_html(newick_str=nwk_str, title=pfam)
+                            st.components.v1.html(html, height=700, scrolling=True)
+                            st.caption(
+                                "Zoom/pan with mouse, click internal nodes to collapse, "
+                                "hover leaves for details. Note the leaf names you want "
+                                "to group and paste them into **Manual MRCA** above."
                             )
+
+                        # -------------- Mode 3: ETE4 smartview, external server --------------
+                        elif preview_mode == "ETE4 smartview (server)":
+                            import subprocess, os, signal, time, socket
+
+                            pfam_idx = list(results.keys()).index(pfam)
+                            default_port = 5001 + pfam_idx
+
+                            server_key = f"hrp_smartview_pid_{pfam}"
+                            port_key = f"hrp_smartview_port_{pfam}"
+                            running_pid = st.session_state.get(server_key)
+                            running_port = st.session_state.get(port_key)
+
+                            col_a, col_b, col_c = st.columns([1, 1, 3])
+
+                            with col_a:
+                                port = st.number_input(
+                                    "Port",
+                                    min_value=1024,
+                                    max_value=65535,
+                                    value=(
+                                        running_port
+                                        if running_pid is not None
+                                        else default_port
+                                    ),
+                                    step=1,
+                                    key=f"hrp_port_input_{pfam}",
+                                    disabled=(running_pid is not None),
+                                )
+
+                            with col_b:
+                                if running_pid is None:
+                                    if st.button(
+                                        "Launch",
+                                        key=f"hrp_launch_{pfam}",
+                                        use_container_width=True,
+                                    ):
+
+                                        cmd = [
+                                            "python",
+                                            "tree_from_db.py",
+                                            "--pfam",
+                                            pfam,
+                                            "--version",
+                                            st.session_state.get(
+                                                "hrp_build_version", "2026_01"
+                                            ),
+                                            "--prefix",
+                                            r["prefix"],
+                                            "--aln",
+                                            st.session_state.get("hrp_aln", "mafft"),
+                                            "--ml",
+                                            st.session_state.get("hrp_ml", "fasttree"),
+                                            "--gt",
+                                            st.session_state.get("hrp_gt", "0.01"),
+                                            "--cpu",
+                                            str(st.session_state.get("hrp_cpu", 4)),
+                                            "--port",
+                                            str(int(port)),
+                                            "--no_ncbi",
+                                        ]
+
+                                        # Pre-kill anything on the port, matching the existing tab
+                                        os.system(
+                                            f"fuser -k {int(port)}/tcp >/dev/null 2>&1"
+                                        )
+
+                                        # Qt offscreen env to prevent display crashes on headless server
+                                        run_env = os.environ.copy()
+                                        run_env["QT_QPA_PLATFORM"] = "offscreen"
+
+                                        with st.spinner(
+                                            f"Starting ETE4 smartview on port {port}..."
+                                        ):
+                                            proc = subprocess.Popen(cmd, env=run_env)
+
+                                            # Wait for the port to actually accept connections
+                                            deadline = time.time() + 120
+                                            connected = False
+                                            while time.time() < deadline:
+                                                try:
+                                                    with socket.create_connection(
+                                                        ("localhost", int(port)),
+                                                        timeout=2,
+                                                    ):
+                                                        connected = True
+                                                        break
+                                                except OSError:
+                                                    time.sleep(2)
+
+                                            if not connected:
+                                                st.error(
+                                                    "ETE4 server did not start within 2 minutes. Check terminal."
+                                                )
+                                                st.stop()
+
+                                        st.session_state[server_key] = proc.pid
+                                        st.session_state[port_key] = int(port)
+                                        st.rerun()
+                                else:
+                                    if st.button(
+                                        "Stop",
+                                        key=f"hrp_stop_{pfam}",
+                                        use_container_width=True,
+                                    ):
+                                        try:
+                                            os.kill(running_pid, signal.SIGKILL)
+                                        except ProcessLookupError:
+                                            pass
+                                        os.system(
+                                            f"fuser -k {running_port}/tcp >/dev/null 2>&1"
+                                        )
+                                        del st.session_state[server_key]
+                                        del st.session_state[port_key]
+                                        st.rerun()
+
+                            with col_c:
+                                if running_pid is not None:
+                                    st.success(
+                                        f"Smartview running on port {running_port} (PID {running_pid})"
+                                    )
+                                    st.caption(
+                                        f"Inline viewer below. SSH tunnel must include "
+                                        f"`-L {running_port}:localhost:{running_port}`. "
+                                        "Right-click a node to inspect leaves; copy names "
+                                        "back into **Manual MRCA** above."
+                                    )
+                                else:
+                                    st.caption(
+                                        "Reuses the cached tree files via tree_from_db.py. "
+                                        "Each Pfam needs its own port; remember to stop when done."
+                                    )
+
+                            # Embed the smartview inside the Streamlit page (no new browser tab needed)
+                            if running_pid is not None:
+                                components.iframe(
+                                    f"http://localhost:{running_port}/static/gui.html?tree=tree-1",
+                                    width=1800,
+                                    height=900,
+                                )
+
+                        # -------------- Newick download, available in all modes --------------
                         st.download_button(
                             "Download Newick",
                             data=nwk_str,
