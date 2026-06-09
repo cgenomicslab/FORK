@@ -19,10 +19,8 @@ from collections import defaultdict
 
 import matplotlib
 
-matplotlib.use("Agg")  # Non-interactive backend — must come before pyplot import.
-# "Agg" renders to an in-memory buffer instead of a screen
-# window. This is required in server/headless environments
-# like the lab server running Streamlit.
+matplotlib.use("Agg")  # Non-interactive backend 
+# "Agg" renders to an in-memory buffer instead of a screen window. Required in server/headless environments (Streamlit running in server)
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
