@@ -15,7 +15,7 @@ The high-resolution phylogenetic profiling pipeline:
             │
             ▼  pandas matrix
 
-Caching
+Cache
 ----------------
 Each (pfam, taxids, exclude_taxids, version, evalue, aln, ml, gt) combination
 gets its own subdirectory under `output_root`, named after a short MD5 hash
@@ -27,7 +27,6 @@ subdirectory — old runs are not deleted.
 
 """
 
-# from __future__ import annotations
 import os
 import subprocess
 import hashlib
