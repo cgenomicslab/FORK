@@ -1646,7 +1646,7 @@ elif choice == "High-Resolution Phylogenetic Profile":
                 )
             with co3:
                 cluster_cols = st.checkbox(
-                    "Cluster columns too (rarely wanted)",
+                    "Cluster columns",
                     value=False,
                     key="hrp_cluster_cols",
                 )
