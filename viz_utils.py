@@ -1,7 +1,5 @@
 """
-viz_utils.py
-============
-Standalone visualization helper script for the UniProt Lab Manager.
+Visualization helper script for the UniProt Lab Manager.
 
 All functions return a BytesIO image buffer that can be passed directly
 to st.image() in Streamlit, or saved to disk with open(..., "wb").write(buf.getvalue()).
@@ -88,40 +86,6 @@ def draw_domain_architecture(
     Draw a domain architecture diagram: one horizontal bar per protein,
     colored domain blocks overlaid at their alignment positions.
 
-    Parameters
-    ----------
-    domain_records : list[dict]
-        Output of fetch_domains_by_accession() or fetch_domains_by_accession
-        from the library. Each dict must have at minimum:
-            accession, hmm_name, ali_from, ali_to
-        Optional but used if present:
-            protein_name, organism, length (protein length in residues)
-
-    protein_lengths : dict, optional
-        {accession: length_in_residues}
-        If not provided, protein length is estimated as max(env_to) across
-        all domains for that protein — a slight underestimate if the
-        C-terminus has no domain, but acceptable for visualization.
-        Pass this dict if you have protein length from the proteins table.
-
-    title : str, optional
-        Figure title. Defaults to "Domain Architecture".
-
-    max_proteins : int, optional  Default 40.
-        Cap on how many proteins are drawn. If more proteins are in the input,
-        only the first max_proteins are shown and a note is added.
-        Prevents figures from becoming unusably tall.
-
-    min_label_width_fraction : float, optional  Default 0.04.
-        Minimum domain width (as a fraction of the longest protein) below
-        which the domain name label is hidden to avoid overlap.
-        E.g. 0.04 means labels are hidden on domains narrower than 4% of
-        the longest protein shown.
-
-    Returns
-    -------
-    io.BytesIO
-        PNG image buffer. Pass directly to st.image().
 
     Example
     -------
@@ -144,7 +108,7 @@ def draw_domain_architecture(
         ax.axis("off")
         return _fig_to_buffer(fig)
 
-    # ── Group domain records by accession ──────────────────────────────────
+    # ---------------- Group domain records by accession ----------------
     # We want: protein_order (stable, insertion order), and for each protein
     # a list of (hmm_name, ali_from, ali_to) tuples sorted by ali_from.
     domains_by_acc = defaultdict(list)
@@ -170,7 +134,7 @@ def draw_domain_architecture(
     truncated = len(protein_list) > max_proteins
     protein_list = protein_list[:max_proteins]
 
-    # ── Resolve protein lengths ────────────────────────────────────────────
+    # ---------------- Resolve protein lengths ----------------
     # Priority: (1) caller-supplied dict, (2) "length" field in record,
     # (3) max(env_to) fallback.
     lengths = {}
@@ -188,13 +152,13 @@ def draw_domain_architecture(
 
     max_len = max(lengths.values()) if lengths else 1
 
-    # ── Collect all unique domain names for the legend ─────────────────────
+    # ---------------- Collect all unique domain names for the legend ----------------
     all_domain_names = sorted(
         {r["hmm_name"] for acc in protein_list for r in domains_by_acc[acc]}
     )
     color_map = {name: _domain_color(name) for name in all_domain_names}
 
-    # ── Figure layout ──────────────────────────────────────────────────────
+    # ---------------- Figure layout ----------------
     # Row height: 0.55 inches per protein + 0.4 inches top margin
     # + space for legend at the bottom (0.35 per legend row, ~4 entries/row)
     n_proteins = len(protein_list)
@@ -212,7 +176,7 @@ def draw_domain_architecture(
     ax.set_xlabel("Residue position", fontsize=9)
     ax.set_title(title or "Domain Architecture", fontsize=11, fontweight="bold", pad=10)
 
-    # Hide y-axis ticks; we'll draw labels manually as text inside the axes
+    # Hide y-axis ticks -- we'll draw labels manually as text inside the axes
     ax.set_yticks([])
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -222,7 +186,7 @@ def draw_domain_architecture(
         y = i  # vertical centre of this protein's row
         prot_len = lengths[acc]
 
-        # ── Backbone: thin grey rectangle spanning protein length ──────────
+        # ---------------- Backbone: thin grey rectangle spanning protein length ----------------
         ax.broken_barh(
             [(0, prot_len)],
             (y - 0.06, 0.12),
@@ -234,7 +198,7 @@ def draw_domain_architecture(
         # Keep track of text boundaries in this row to prevent overlapping text blobs
         occupied_text_regions = []
 
-        # ── Domain blocks ──────────────────────────────────────────────────
+        # ---------------- Domain blocks ----------------
         for rec in domains_by_acc[acc]:
             d_start = rec.get("ali_from", 0)
             d_end = rec.get("ali_to", 0)
@@ -253,14 +217,13 @@ def draw_domain_architecture(
                 zorder=2,
             )
 
-            # ── Text Label Logic ──
+            # --- Text Label Logic ---
             hmm_name = rec["hmm_name"]
 
             # Heuristic: Estimate text width in data coordinates
             # ~0.6% of the max axis length per character at font size 6.5
             est_text_width = len(hmm_name) * max_len * 0.006
 
-            # Check 1: Is the domain block wide enough to fit this specific text?
             if d_width >= est_text_width and (
                 d_width / max_len >= min_label_width_fraction
             ):
@@ -269,7 +232,6 @@ def draw_domain_architecture(
                 label_start = label_x - (est_text_width / 2)
                 label_end = label_x + (est_text_width / 2)
 
-                # Check 2: Does this overlap with any text we already drew in this row?
                 is_overlapping = any(
                     not (label_end < occ_start or label_start > occ_end)
                     for occ_start, occ_end in occupied_text_regions
@@ -291,7 +253,7 @@ def draw_domain_architecture(
                     # Record this space as occupied
                     occupied_text_regions.append((label_start, label_end))
 
-        # ── Protein label to the left of the backbone ──────────────────────
+        # ---------------- Protein label to the left of the backbone ----------------
         label_x = -max_len * 0.01
         ax.text(
             label_x,
@@ -304,7 +266,7 @@ def draw_domain_architecture(
             transform=ax.transData,
         )
 
-    # ── Legend ─────────────────────────────────────────────────────────────
+    # ---------------- Legend ----------------
     legend_handles = [
         mpatches.Patch(color=color_map[name], label=name) for name in all_domain_names
     ]
@@ -351,31 +313,6 @@ def render_tree(
     """
     Render a Newick tree string as a PNG image using Bio.Phylo + matplotlib.
 
-    Parameters
-    ----------
-    newick_string : str
-        A valid Newick format tree string, e.g. output of tree_from_db.py.
-
-    ladderize : bool, optional  Default True.
-        Sort clades by size so the tree has a clean "ladderized" appearance
-        (small clades at the top, large at the bottom). Highly recommended
-        for readability.
-
-    label_font_size : int, optional  Default 7.
-        Font size for leaf labels. Reduce for trees with many leaves.
-        Automatically reduced further for trees with >60 leaves.
-
-    branch_color : str, optional  Default dark blue.
-        Color for all branches.
-
-    max_leaves_before_compact : int, optional  Default 80.
-        Trees with more leaves than this will have labels suppressed
-        (too dense to read) and a note added. The tree topology is
-        still rendered — without overlapping labels.
-
-    Returns
-    -------
-    io.BytesIO  PNG image buffer. Pass directly to st.image().
 
     Example
     -------
@@ -460,44 +397,12 @@ def draw_presence_absence_heatmap(
     """
     Draw a clustered heatmap of the presence/absence matrix.
 
-    This is more informative than the styled dataframe for large matrices:
     seaborn.clustermap() reorders both rows (organisms) and columns (profiles)
     by hierarchical clustering, grouping organisms with similar profile
     complements together. This reveals evolutionary patterns — e.g. all
     Bacteria clustering together because they share a set of profiles that
     Eukaryotes lack.
 
-    Parameters
-    ----------
-    matrix_df : pd.DataFrame
-        The pivoted matrix from the Presence/Absence tab.
-        Rows = organisms (taxon labels), columns = HMM profile names,
-        values = protein counts (integers, 0 for absent).
-        This is exactly what the tab already stores in session_state.
-
-    title : str, optional
-        Figure title.
-
-    cmap : str, optional  Default "viridis".
-        Matplotlib colormap name. "viridis" (blue -> yellow) reads naturally
-        as absence→strong presence.
-
-    cluster : bool, optional  Default True.
-        If True, use seaborn.clustermap() which reorders rows+cols by
-        hierarchical clustering.
-        If False, use a plain seaborn.heatmap() preserving input order.
-        Set cluster=False if you have a single profile column (clustermap
-        requires at least 2 columns to cluster).
-
-    Returns
-    -------
-    io.BytesIO  PNG image buffer. Pass directly to st.image().
-
-    Example
-    -------
-    matrix_df = pd.DataFrame(rows).pivot_table(...)
-    buf = viz.draw_presence_absence_heatmap(matrix_df)
-    st.image(buf, use_container_width=True)
     """
     try:
         import seaborn as sns
@@ -576,3 +481,213 @@ def draw_presence_absence_heatmap(
         ax.set_title(title, fontsize=11, fontweight="bold")
         plt.tight_layout()
         return _fig_to_buffer(fig)
+
+
+# ---------------------------------------------------------------------------
+# 4. High-resolution phylogenetic profile heatmap
+# ---------------------------------------------------------------------------
+
+
+def draw_highres_profile_heatmap(
+    matrix_df,
+    column_origin: dict = None,
+    taxon_names: dict = None,
+    missing_accessions=None,
+    title: str = "High-Resolution Phylogenetic Profile",
+    binary: bool = False,
+    log_scale: bool = False,
+    cluster_rows: bool = True,
+    cluster_cols: bool = False,
+    cmap: str = None,
+    figsize=None,
+) -> io.BytesIO:
+    """
+    Draw a clustered heatmap of the high-resolution phylogenetic profile.
+
+    Rows are taxa, columns are Pfam-subclade pairs (e.g. "PF00041-A").
+    A colored stripe above the columns groups subclades by their parent Pfam,
+    making paralog-group structure visible at a glance.
+
+
+
+    Example
+    -------
+    out = fetch_highres_profile("2026_01", pfam_subclade_map, binary=False)
+    buf = viz.draw_highres_profile_heatmap(
+        out["matrix"],
+        column_origin       = out["column_origin"],
+        taxon_names         = out["taxon_names"],
+        missing_accessions  = out["missing_accessions"],
+        log_scale           = True,
+    )
+    st.image(buf, use_container_width=True)
+    """
+    try:
+        import seaborn as sns
+    except ImportError as e:
+        raise ImportError(
+            "seaborn is required for draw_highres_profile_heatmap()."
+        ) from e
+
+    if matrix_df.empty:
+        fig, ax = plt.subplots(figsize=(8, 2))
+        ax.text(
+            0.5,
+            0.5,
+            "No data to display.",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            fontsize=12,
+        )
+        ax.axis("off")
+        return _fig_to_buffer(fig)
+
+    n_rows, n_cols = matrix_df.shape
+
+    # ---------------- Auto-select colormap ----------------
+    if cmap is None:
+        cmap = "Greys" if binary else "viridis"
+
+    # ---------------- Build display matrix (log-transform if requested) ----------------
+    if log_scale and not binary:
+        display_df = np.log1p(matrix_df.astype(float))
+        cbar_label = "log1p(protein count)"
+    else:
+        display_df = matrix_df.astype(float)
+        cbar_label = "Presence (0/1)" if binary else "Protein count"
+
+    # ---------------- Row labels: "9606  Homo sapiens" if names provided ----------------
+    if taxon_names:
+        new_index = [
+            f"{tx}  {taxon_names.get(tx, '?')}" if taxon_names.get(tx) else str(tx)
+            for tx in display_df.index
+        ]
+        display_df = display_df.copy()
+        display_df.index = new_index
+
+    # ---------------- Build col_colors stripe grouping subclades by their Pfam ----------------
+    col_colors = None
+    pfam_color_map = {}
+    if column_origin:
+        # One color per distinct Pfam
+        unique_pfams = []
+        for col in display_df.columns:
+            origin = column_origin.get(col)
+            if origin is None:
+                continue
+            pfam = origin[0]
+            if pfam not in unique_pfams:
+                unique_pfams.append(pfam)
+
+        # Use a categorical palette
+        palette_name = "tab10" if len(unique_pfams) <= 10 else "tab20"
+        palette = sns.color_palette(palette_name, n_colors=max(len(unique_pfams), 1))
+        pfam_color_map = dict(zip(unique_pfams, palette))
+
+        col_colors = [
+            pfam_color_map.get(column_origin.get(c, (None,))[0], (1, 1, 1))
+            for c in display_df.columns
+        ]
+
+    # ---------------- Figure size ----------------
+    if figsize is None:
+        fig_width = max(7, n_cols * 0.55 + 4)
+        fig_height = max(4, n_rows * 0.45 + 2)
+    else:
+        fig_width, fig_height = figsize
+
+    # ---------------- clustermap ----------------
+    # Disable clustering on an axis if there's only one row/column on it.
+    rc = cluster_rows and n_rows >= 2
+    cc = cluster_cols and n_cols >= 2
+
+    annot_show = n_rows <= 30 and n_cols <= 20
+    # When log-scaling, color uses log1p but annotations should show
+    # the original counts
+    if annot_show and log_scale and not binary:
+        annot = matrix_df.astype(int).copy()
+        if taxon_names:
+            annot.index = display_df.index  # match the relabeled rows
+        annot_fmt = "d"
+    elif annot_show:
+        annot = True
+        annot_fmt = ".0f"
+    else:
+        annot = False
+        annot_fmt = ".0f"
+
+    g = sns.clustermap(
+        display_df,
+        cmap=cmap,
+        figsize=(fig_width, fig_height),
+        row_cluster=rc,
+        col_cluster=cc,
+        col_colors=col_colors,
+        linewidths=0.3,
+        linecolor="#e0e0e0",
+        annot=annot,
+        fmt=annot_fmt,
+        cbar_kws={"label": cbar_label},
+        cbar_pos=(0.03, 0.15, 0.02, 0.15),
+        dendrogram_ratio=(0.12, 0.08 if cc else 0.02),
+        xticklabels=True,
+        yticklabels=True,
+    )
+
+    # Colorbar on the left, away from the heatmap
+    g.cax.yaxis.set_ticks_position("left")
+    g.cax.yaxis.set_label_position("left")
+
+    # For binary, force integer 0 / 1 ticks
+    if binary:
+        g.cax.set_yticks([0, 1])
+
+    # Axis labels & tick rotations
+    g.ax_heatmap.set_xlabel("Pfam · Subclade", fontsize=9)
+    g.ax_heatmap.set_ylabel("Taxon", fontsize=9)
+    g.ax_heatmap.set_xticklabels(
+        g.ax_heatmap.get_xticklabels(), rotation=45, ha="right", fontsize=8
+    )
+    g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0, fontsize=8)
+
+    # Title
+    g.fig.suptitle(title, y=1.01, fontsize=11, fontweight="bold")
+
+    # Pfam legend (if we have col_colors)
+    if pfam_color_map:
+        handles = [
+            mpatches.Patch(color=color, label=pfam)
+            for pfam, color in pfam_color_map.items()
+        ]
+        g.ax_heatmap.legend(
+            handles=handles,
+            title="Pfam",
+            bbox_to_anchor=(1.02, 1.0),
+            loc="upper left",
+            fontsize=8,
+            title_fontsize=9,
+            frameon=False,
+        )
+
+    # missing accessions note
+    if missing_accessions:
+        n_missing = len(missing_accessions)
+        g.fig.text(
+            0.5,
+            -0.02,
+            f"Note: {n_missing} accession(s) from the input trees were not "
+            f"found in the database for this version and were excluded "
+            f"from counts.",
+            ha="center",
+            va="top",
+            fontsize=8,
+            style="italic",
+            color="#666",
+        )
+
+    buf = io.BytesIO()
+    g.fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    buf.seek(0)
+    plt.close(g.fig)
+    return buf

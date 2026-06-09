@@ -41,6 +41,7 @@ import os
 import sys
 from dotenv import load_dotenv
 import getpass
+import pandas as pd
 
 load_dotenv()
 
@@ -59,6 +60,8 @@ __all__ = [
     "fetch_accessions_for_cell",
     "fetch_subprofile_hits",
     "fetch_domain_architectures",
+    "fetch_accessions_with_taxids",
+    "fetch_highres_profile",
 ]
 
 
@@ -117,16 +120,16 @@ class UniProtRetriever:
     """
 
     def __init__(self, config):
-  
+
         self.config = config
         self.conn = None
         self.cursor = None
 
-# ==========================================================================================================
+    # ==========================================================================================================
 
-#                                       CONNECTION MANAGEMENT
+    #                                       CONNECTION MANAGEMENT
 
-# ==========================================================================================================
+    # ==========================================================================================================
     def connect(self):
         """
         Open the database connection.
@@ -150,11 +153,11 @@ class UniProtRetriever:
         self.close()
         return False
 
-# ==========================================================================================================
+    # ==========================================================================================================
 
-#                                       UTILITY QUERIES
+    #                                       UTILITY QUERIES
 
-# ==========================================================================================================
+    # ==========================================================================================================
 
     def list_available_versions(self):
         """
@@ -203,11 +206,11 @@ class UniProtRetriever:
         self.cursor.execute(query, (version,))
         return [row["proteome_id"] for row in self.cursor.fetchall()]
 
-# ==========================================================================================================
+    # ==========================================================================================================
 
-#                                               MAIN RETRIEVAL
+    #                                               MAIN RETRIEVAL
 
-# ==========================================================================================================
+    # ==========================================================================================================
 
     def get_proteins(
         self,
@@ -273,11 +276,11 @@ class UniProtRetriever:
         except mysql.connector.Error as err:
             raise RuntimeError(f"Database query failed: {err}") from err
 
-# ==========================================================================================================
+    # ==========================================================================================================
 
-#                                       HMM HIT BASED RETRIEVAL
+    #                                       HMM HIT BASED RETRIEVAL
 
-# ==========================================================================================================
+    # ==========================================================================================================
     def get_proteins_by_hmm_hit(
         self,
         version,
@@ -355,11 +358,11 @@ class UniProtRetriever:
         except mysql.connector.Error as err:
             raise RuntimeError(f"Database query failed: {err}") from err
 
-# ==========================================================================================================
+    # ==========================================================================================================
 
-#                                       DOMAIN LOOKUP BY ACCESSION
+    #                                       DOMAIN LOOKUP BY ACCESSION
 
-# ==========================================================================================================
+    # ==========================================================================================================
 
     def get_domains_by_accession(
         self,
@@ -598,7 +601,7 @@ class UniProtRetriever:
         Call this when the user clicks a cell in the UI. The returned
         accessions are then passed directly into get_subprofile_hits()
         and/or get_domain_architectures() for step-2 drill-down.
-        
+
         Example
         -------
         # User clicks the (9606, "Homeodomain") cell:
@@ -953,6 +956,156 @@ class UniProtRetriever:
 
         return all_results
 
+    def get_accessions_with_taxids(
+        self,
+        version,
+        accessions,
+        chunk_size=5000,
+    ):
+        """Bulk lookup: accession → taxon_id + scientific name.
+
+        Used to map tree leaves (UniProt accessions) back to the taxa
+        that own them, so subclade memberships can be turned into the
+        rows of a high-resolution phylogenetic profile matrix.
+
+        Large accession lists are chunked automatically (default 5,000
+        per query) so the IN (...) clause never becomes a bottleneck.
+
+
+        Examples
+        --------
+        rows = db.get_accessions_with_taxids("2026_01", ["P04637", "P10275"])
+        acc_to_taxon = {r["accession"]: r["taxon_id"] for r in rows}
+        """
+
+        if isinstance(accessions, str):
+            accessions = [accessions]
+        if not accessions:
+            return []
+
+        # Deduplicate — trees can have repeated leaves after some ops,
+        # so the same accession can show up across subclades by mistake.
+        accessions = list(set(accessions))
+
+        all_results = []
+        try:
+            for i in range(0, len(accessions), chunk_size):
+                chunk = accessions[i : i + chunk_size]
+                placeholders = ", ".join(["%s"] * len(chunk))
+
+                query = f"""
+                    SELECT   accession,
+                             taxon_id,
+                             organism AS scientific_name
+                    FROM     proteins
+                    WHERE    version = %s
+                      AND    accession IN ({placeholders})
+                """
+                params = [version] + chunk
+                self.cursor.execute(query, tuple(params))
+                all_results.extend(self.cursor.fetchall())
+        except mysql.connector.Error as err:
+            raise RuntimeError(f"Database query failed: {err}") from err
+
+        return all_results
+
+    # High-resolution phylogenetic profile (gets the output of the subclade partition)
+    def get_highres_profile(
+        self,
+        version,
+        pfam_subclade_map,
+        taxon_ids=None,
+        binary=False,
+    ):
+        """
+        Build a high-resolution phylogenetic profile matrix.
+
+        Per-Pfam gene-tree subclades become the columns of the matrix.
+        Each cell counts how many proteins of that Pfam-subclade are
+        carried by that taxon. With `binary=True`, cells become 0/1
+        instead of counts.
+
+         - Column order is preserved exactly as in the input
+            Don't rely on alphabetical order.
+        - `missing_accessions` is not an error — common causes are
+          (a) tree was built against a different UniProt version, or
+          (b) the accession was renamed/removed between versions.
+
+        """
+        # 1. Flatten input --> set of every unique accession
+        all_accessions = set()
+        for pfam, subs in pfam_subclade_map.items():
+            for label, accs in subs.items():
+                all_accessions |= set(accs)
+
+        empty_return = {
+            "matrix": pd.DataFrame(),
+            "taxon_names": {},
+            "missing_accessions": set(),
+            "column_origin": {},
+        }
+
+        if not all_accessions:
+            return empty_return
+
+        # 2. Bulk taxid lookup
+        rows = self.get_accessions_with_taxids(version, list(all_accessions))
+        acc_to_taxon = {r["accession"]: r["taxon_id"] for r in rows}
+        taxon_names = {r["taxon_id"]: r["scientific_name"] for r in rows}
+
+        missing = all_accessions - set(acc_to_taxon.keys())
+
+        # 3. Build long-form (taxon, column) records
+        column_origin = {}
+        long_records = []
+        for pfam, subs in pfam_subclade_map.items():
+            for label, accs in subs.items():
+                col = f"{pfam}-{label}"
+                column_origin[col] = (pfam, label)
+                for acc in accs:
+                    tx = acc_to_taxon.get(acc)
+                    if tx is None:
+                        continue  # accession not in DB --> already tracked in `missing`
+                    long_records.append((tx, col))
+
+        if not long_records:
+            empty_return["taxon_names"] = taxon_names
+            empty_return["missing_accessions"] = missing
+            empty_return["column_origin"] = column_origin
+            return empty_return
+
+        long_df = pd.DataFrame(long_records, columns=["taxon_id", "column"])
+
+        # 4. Pivot --> wide matrix, counts
+        matrix = long_df.groupby(["taxon_id", "column"]).size().unstack(fill_value=0)
+
+        # 5. All columns present (even empty) and preserve order
+        for col in column_origin:
+            if col not in matrix.columns:
+                matrix[col] = 0
+        matrix = matrix[list(column_origin.keys())]
+
+        # 6. Optional row filter / reorder
+        if taxon_ids is not None:
+            if isinstance(taxon_ids, (int, str)):
+                taxon_ids = [taxon_ids]
+            taxon_ids = [int(t) for t in taxon_ids]
+            matrix = matrix.reindex(taxon_ids, fill_value=0)
+
+        if binary:
+            matrix = (matrix > 0).astype(int)
+
+        # Name the axes for cleaner downstream display
+        matrix.index.name = "taxon_id"
+        matrix.columns.name = "pfam_subclade"
+
+        return {
+            "matrix": matrix,
+            "taxon_names": taxon_names,
+            "missing_accessions": missing,
+            "column_origin": column_origin,
+        }
+
     # ------------------------------------------------------------------
     # Output helpers
     # ------------------------------------------------------------------
@@ -1026,7 +1179,7 @@ class UniProtRetriever:
 
 # ==========================================================================================================
 
-#                            MODULE LEVEL CONVENIENCE FUNCTIONS/ User can import 
+#                            MODULE LEVEL CONVENIENCE FUNCTIONS/ User can import
 #                                       without using the class
 
 # ==========================================================================================================
@@ -1338,6 +1491,35 @@ def fetch_domain_architectures(
         )
 
 
+def fetch_accessions_with_taxids(version, accessions, db_config=None):
+    """
+    One-call helper: connect --> bulk accession --> taxid lookup --> disconnect.
+    """
+    config = db_config or get_db_config()
+    with UniProtRetriever(config) as db:
+        return db.get_accessions_with_taxids(version, accessions)
+
+
+def fetch_highres_profile(
+    version,
+    pfam_subclade_map,
+    taxon_ids=None,
+    binary=False,
+    db_config=None,
+):
+    """
+    One-call helper: connect --> build high-res phylogenetic profile --> disconnect.
+    """
+    config = db_config or get_db_config()
+    with UniProtRetriever(config) as db:
+        return db.get_highres_profile(
+            version=version,
+            pfam_subclade_map=pfam_subclade_map,
+            taxon_ids=taxon_ids,
+            binary=binary,
+        )
+
+
 # ==========================================================================================================
 
 #                                                CLI
@@ -1404,30 +1586,40 @@ def _build_parser():
         metavar="GO_ID",
         help="Get all HMM Profiles found in proteins annotated with a GO term",
     )
-    
+
     # Direct credentials (alternative to .env)
-    parser.add_argument("--host",     default=None, help="Database host (overrides .env / default)")
-    parser.add_argument("--user",     default=None, help="Database user (overrides .env / default)")
-    parser.add_argument("--password", default=None, help="Database password (overrides .env / default)")
-    parser.add_argument("--database", default=None, help="Database name (overrides .env / default)")
-    
+    parser.add_argument(
+        "--host", default=None, help="Database host (overrides .env / default)"
+    )
+    parser.add_argument(
+        "--user", default=None, help="Database user (overrides .env / default)"
+    )
+    parser.add_argument(
+        "--password", default=None, help="Database password (overrides .env / default)"
+    )
+    parser.add_argument(
+        "--database", default=None, help="Database name (overrides .env / default)"
+    )
+
     return parser
 
 
-
-        
 def main():
     args = _build_parser().parse_args()
-    
-    if args.user and args.password is None:
-        args.password = getpass.getpass(prompt=f"Password for {args.user}@{args.host or 'localhost'}: ")
 
-    retriever = UniProtRetriever(get_db_config(
-    host=args.host,
-    user=args.user,
-    password=args.password,
-    database=args.database,
-    ))
+    if args.user and args.password is None:
+        args.password = getpass.getpass(
+            prompt=f"Password for {args.user}@{args.host or 'localhost'}: "
+        )
+
+    retriever = UniProtRetriever(
+        get_db_config(
+            host=args.host,
+            user=args.user,
+            password=args.password,
+            database=args.database,
+        )
+    )
 
     try:
         retriever.connect()
