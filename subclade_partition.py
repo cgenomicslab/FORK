@@ -38,13 +38,12 @@ Quick usage
     ])
 """
 
-# from __future__ import annotations
 from typing import Dict, Iterable, List, Set, Union
 
 from ete4 import Tree
 
 # -----------------------------------------------------------------------------
-# Helpers
+# Helper Functions
 # -----------------------------------------------------------------------------
 
 
