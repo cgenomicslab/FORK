@@ -3,9 +3,11 @@ import get_reference_uniprot_set_lib as uni
 import subprocess
 import pandas as pd
 import os
+import signal
 import socket
 import time
 import io
+import sys
 from pathlib import Path
 
 
@@ -1316,7 +1318,7 @@ elif choice == "High-Resolution Phylogenetic Profile":
             )
             evalue = st.number_input(
                 "E-value cutoff (optional)",
-                value=1e-5,
+                value=None,
                 format="%.1e",
                 key="hrp_evalue",
             )
@@ -1429,11 +1431,8 @@ elif choice == "High-Resolution Phylogenetic Profile":
                 st.session_state["hrp_profile_output"] = None
                 st.session_state["hrp_build_version"] = version
                 st.session_state["hrp_build_taxids"] = taxids
+
                 st.rerun()
-                st.session_state["hrp_aln"] = aln
-                st.session_state["hrp_ml"] = ml
-                st.session_state["hrp_gt"] = gt
-                st.session_state["hrp_cpu"] = int(cpu)
 
     # -------------------------------------------------------------
     # SECTION 2: Tree-build summary
@@ -1500,7 +1499,7 @@ elif choice == "High-Resolution Phylogenetic Profile":
             ):
                 mode = st.radio(
                     "Partition mode",
-                    ["Depth slider", "Manual MRCA"],
+                    ["Depth slider", "Manual MRCA", "Node path"],
                     horizontal=True,
                     key=f"hrp_mode_{pfam}",
                 )
@@ -1523,7 +1522,7 @@ elif choice == "High-Resolution Phylogenetic Profile":
                         except Exception as e:
                             st.error(f"Partition failed: {e}")
 
-                else:  # Manual MRCA
+                elif mode == "Manual MRCA":
                     mrca_text = st.text_area(
                         "Leaf-name groups (one group per line, comma-separated)",
                         placeholder=(
@@ -1565,6 +1564,44 @@ elif choice == "High-Resolution Phylogenetic Profile":
                                 groups,
                                 include_unassigned=include_unassigned,
                             )
+                        except Exception as e:
+                            st.error(f"Partition failed: {e}")
+
+                elif mode == "Node path":
+                    # Optional node browser
+                    if st.checkbox(
+                        "Show node list (path + leaf count)", key=f"hrp_nodelist_{pfam}"
+                    ):
+                        node_rows = sp.list_internal_nodes(tree)
+                        st.dataframe(
+                            pd.DataFrame(node_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                    path_text = st.text_area(
+                        "Node paths (one per line, comma-separated child indices)",
+                        placeholder="# Each line = one subclade, e.g.\n0,1\n1,0\n1,1,0",
+                        height=120,
+                        key=f"hrp_pathtext_{pfam}",
+                    )
+
+                    # Parse: one path per non-blank, non-comment line.
+                    paths = []
+                    for line in path_text.splitlines():
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        try:
+                            paths.append(
+                                [int(x) for x in line.split(",") if x.strip() != ""]
+                            )
+                        except ValueError:
+                            st.warning(f"Skipping unparseable line: {line}")
+
+                    if paths:
+                        try:
+                            new_parts = sp.partition_by_node_path(tree, paths)
                         except Exception as e:
                             st.error(f"Partition failed: {e}")
 
@@ -1641,7 +1678,6 @@ elif choice == "High-Resolution Phylogenetic Profile":
 
                         # -------------- Mode 3: ETE4 smartview, external server --------------
                         elif preview_mode == "ETE4 smartview (server)":
-                            import subprocess, os, signal, time, socket
 
                             pfam_idx = list(results.keys()).index(pfam)
                             default_port = 5001 + pfam_idx
@@ -1675,68 +1711,74 @@ elif choice == "High-Resolution Phylogenetic Profile":
                                         key=f"hrp_launch_{pfam}",
                                         use_container_width=True,
                                     ):
-
-                                        cmd = [
-                                            "python",
-                                            "tree_from_db.py",
-                                            "--pfam",
-                                            pfam,
-                                            "--version",
-                                            st.session_state.get(
-                                                "hrp_build_version", "2026_01"
-                                            ),
-                                            "--prefix",
-                                            r["prefix"],
-                                            "--aln",
-                                            st.session_state.get("hrp_aln", "mafft"),
-                                            "--ml",
-                                            st.session_state.get("hrp_ml", "fasttree"),
-                                            "--gt",
-                                            st.session_state.get("hrp_gt", "0.01"),
-                                            "--cpu",
-                                            str(st.session_state.get("hrp_cpu", 4)),
-                                            "--port",
-                                            str(int(port)),
-                                            "--no_ncbi",
-                                        ]
-
-                                        # Pre-kill anything on the port, matching the existing tab
-                                        os.system(
-                                            f"fuser -k {int(port)}/tcp >/dev/null 2>&1"
+                                        # Probe the port first for a clean error
+                                        sock = socket.socket(
+                                            socket.AF_INET, socket.SOCK_STREAM
                                         )
+                                        try:
+                                            sock.bind(("localhost", int(port)))
+                                            port_free = True
+                                        except OSError:
+                                            port_free = False
+                                        finally:
+                                            sock.close()
 
-                                        # Qt offscreen env to prevent display crashes on headless server
-                                        run_env = os.environ.copy()
-                                        run_env["QT_QPA_PLATFORM"] = "offscreen"
-
-                                        with st.spinner(
-                                            f"Starting ETE4 smartview on port {port}..."
-                                        ):
+                                        if not port_free:
+                                            st.error(
+                                                f"Port {port} is already in use. Pick a different "
+                                                f"port, or run `ss -tlnp | grep {port}` on the "
+                                                "server to find/kill the process holding it."
+                                            )
+                                        else:
+                                            os.system(
+                                                f"fuser -k {int(port)}/tcp >/dev/null 2>&1"
+                                            )
+                                            run_env = os.environ.copy()
+                                            run_env["QT_QPA_PLATFORM"] = "offscreen"
+                                            # Open the RESOLVED tree so node paths in the viewer
+                                            # match partition_by_node_path exactly.
+                                            cmd = [
+                                                sys.executable,
+                                                "tree_from_db.py",
+                                                "--pfam",
+                                                pfam,
+                                                "--version",
+                                                st.session_state.get(
+                                                    "hrp_build_version", "2026_01"
+                                                ),
+                                                "--prefix",
+                                                r["prefix"],
+                                                "--port",
+                                                str(int(port)),
+                                                "--no_ncbi",
+                                                "--use_resolved",
+                                            ]
                                             proc = subprocess.Popen(cmd, env=run_env)
 
-                                            # Wait for the port to actually accept connections
-                                            deadline = time.time() + 120
-                                            connected = False
-                                            while time.time() < deadline:
-                                                try:
-                                                    with socket.create_connection(
-                                                        ("localhost", int(port)),
-                                                        timeout=2,
-                                                    ):
-                                                        connected = True
-                                                        break
-                                                except OSError:
-                                                    time.sleep(2)
+                                            with st.spinner(
+                                                f"Starting ETE4 smartview on port {port}..."
+                                            ):
+                                                deadline = time.time() + 120
+                                                connected = False
+                                                while time.time() < deadline:
+                                                    try:
+                                                        with socket.create_connection(
+                                                            ("127.0.0.1", int(port)),
+                                                            timeout=2,
+                                                        ):
+                                                            connected = True
+                                                            break
+                                                    except OSError:
+                                                        time.sleep(2)
 
                                             if not connected:
                                                 st.error(
                                                     "ETE4 server did not start within 2 minutes. Check terminal."
                                                 )
-                                                st.stop()
-
-                                        st.session_state[server_key] = proc.pid
-                                        st.session_state[port_key] = int(port)
-                                        st.rerun()
+                                            else:
+                                                st.session_state[server_key] = proc.pid
+                                                st.session_state[port_key] = int(port)
+                                                st.rerun()
                                 else:
                                     if st.button(
                                         "Stop",
@@ -1762,16 +1804,14 @@ elif choice == "High-Resolution Phylogenetic Profile":
                                     st.caption(
                                         f"Inline viewer below. SSH tunnel must include "
                                         f"`-L {running_port}:localhost:{running_port}`. "
-                                        "Right-click a node to inspect leaves; copy names "
-                                        "back into **Manual MRCA** above."
+                                        "Read a node path in the viewer, paste it into **Node path** above."
                                     )
                                 else:
                                     st.caption(
-                                        "Reuses the cached tree files via tree_from_db.py. "
-                                        "Each Pfam needs its own port; remember to stop when done."
+                                        "Opens the resolved tree so viewer node paths match "
+                                        "Node-path mode. Each Pfam needs its own port; stop when done."
                                     )
 
-                            # Embed the smartview inside the Streamlit page (no new browser tab needed)
                             if running_pid is not None:
                                 components.iframe(
                                     f"http://localhost:{running_port}/static/gui.html?tree=tree-1",

@@ -183,6 +183,7 @@ def build_one_tree(
         "cache_key": key,
         "prefix": prefix,
         "tree_path": tree_path,
+        "resolved_tree_path": None,
         "tree": None,
         "leaves": [],
         "cached": cached,
@@ -240,6 +241,18 @@ def build_one_tree(
         with open(tree_path) as f:
             nwk = f.read().strip()
         tree = Tree(nwk)
+        # FastTree writes an unrooted tree with a trifurcating root
+        # (children 0,1,2). ETE's explorer displays it as binary. Resolve
+        # the polytomy here so the node-path numbering the user reads in the
+        # ETE viewer matches what partition_by_node_path resolves against.
+        if len(tree.children) > 2:
+            tree.resolve_polytomy()
+        tree.ladderize()
+        # Write the resolved tree so the ETE explorer and the node-path
+        # partitioner read identical structure (identical 0/1 numbering).
+        resolved_path = tree_path + ".resolved.nwk"
+        tree.write(outfile=resolved_path)
+        result["resolved_tree_path"] = resolved_path
     except Exception as e:
         result["error"] = f"failed to parse Newick: {e}"
         return result

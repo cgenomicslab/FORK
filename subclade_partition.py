@@ -225,6 +225,69 @@ def partition_by_mrca(
 
 
 # -----------------------------------------------------------------------------
+#     Partition the tree by explicit ETE4 node paths.
+# -----------------------------------------------------------------------------
+
+
+def partition_by_node_path(tree, paths):
+    """
+
+    Each path is a list of child indices from the root: [] = root,
+    [0] = first child of root, [1, 1] = root's second child's second child.
+
+    Unlike the depth slider, that takes every clade at one depth, this
+    picks only the nodes the user names. Leaves not under any picked node are
+    dropped entirely.
+
+    Invalid paths are skipped.
+    """
+    result = {}
+    label_i = 0
+    for path in paths:
+        node = tree
+        ok = True
+        for idx in path:
+            if 0 <= idx < len(node.children):
+                node = node.children[idx]
+            else:
+                ok = False
+                break
+        if not ok:
+            continue
+        result[_index_to_label(label_i)] = {leaf.name for leaf in node.leaves()}
+        label_i += 1
+    return result
+
+
+def list_internal_nodes(tree, max_nodes=300):
+    """
+    List internal nodes with their ETE4 path and leaf count, to help find
+    which paths to pick for partition_by_node_path.
+
+    Returns list of dict: {"path": "0,1", "n_leaves": 42, "sample": "..."}
+    Sorted by leaf count descending, capped at max_nodes.
+    """
+    rows = []
+    stack = [(tree, [])]
+    while stack:
+        node, path = stack.pop()
+        if not node.is_leaf:
+            leaves = [leaf.name for leaf in node.leaves()]
+            rows.append(
+                {
+                    "path": ",".join(str(i) for i in path),
+                    "n_leaves": len(leaves),
+                    "sample": ", ".join(sorted(leaves)[:3])
+                    + (" ..." if len(leaves) > 3 else ""),
+                }
+            )
+        for i, child in enumerate(node.children):
+            stack.append((child, path + [i]))
+    rows.sort(key=lambda r: r["n_leaves"], reverse=True)
+    return rows[:max_nodes]
+
+
+# -----------------------------------------------------------------------------
 # To test, run: python subclade_partition.py
 # -----------------------------------------------------------------------------
 
