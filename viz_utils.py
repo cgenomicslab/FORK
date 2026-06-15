@@ -644,9 +644,11 @@ def draw_highres_profile_heatmap(
         yticklabels=True,
     )
 
-    # Colorbar on the left, away from the heatmap
+    # Colorbar layout adjustment (Outward vertical style)
     g.cax.yaxis.set_ticks_position("left")
     g.cax.yaxis.set_label_position("left")
+    g.cax.set_ylabel(cbar_label, fontsize=8, labelpad=12, rotation=90)
+    g.cax.tick_params(axis="y", labelsize=8)
 
     # For binary, force integer 0 / 1 ticks
     if binary:
@@ -665,15 +667,22 @@ def draw_highres_profile_heatmap(
 
     # Pfam legend
     if pfam_color_map:
+        import matplotlib.patches as mpatches
+
         handles = [
             mpatches.Patch(color=color, label=pfam)
             for pfam, color in pfam_color_map.items()
         ]
-        g.fig.legend(
+
+        # Placing the legend safely below the heatmap's x-axis labels
+        g.ax_heatmap.legend(
             handles=handles,
             title="Pfam",
-            loc="lower center",
-            bbox_to_anchor=(0.5, -0.04),
+            loc="upper center",
+            bbox_to_anchor=(
+                0.5,
+                -0.22,
+            ),  # Pushes the legend safely below the 45-degree rotated labels
             ncol=len(pfam_color_map),
             fontsize=8,
             title_fontsize=9,

@@ -1750,7 +1750,7 @@ elif choice == "High-Resolution Phylogenetic Profile":
                                                 r["prefix"],
                                                 "--port",
                                                 str(int(port)),
-                                                "--no_ncbi",
+                                                # "--no_ncbi",
                                                 "--use_resolved",
                                             ]
                                             proc = subprocess.Popen(cmd, env=run_env)
