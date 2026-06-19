@@ -330,6 +330,38 @@ elif choice == "Phylogenetic Tree":
         )
         no_ncbi = st.checkbox("Skip NCBI annotation (faster)", value=True)
 
+        pfam_source = st.selectbox(
+            "Pfam source",
+            ["hmmsearch", "uniprot"],
+            help="hmmsearch = local Pfam-A HMM results; uniprot = UniProt's own "
+            "protein_pfam assignments (no e-value/exclude filter).",
+        )
+        pfam_logic = st.selectbox(
+            "Multi-Pfam logic",
+            ["or", "and"],
+            help="With >1 Pfam: or = any Pfam; and = only proteins with all Pfams.",
+        )
+        color_by = st.selectbox(
+            "Colour branches by",
+            ["taxon", "pfam"],
+            help="taxon = by lineage; pfam = by which queried Pfam(s) each protein carries.",
+        )
+        local_fasta = st.text_input(
+            "Local FASTA path (optional)",
+            placeholder="/path/to/seqs.fa (headers as taxid.accession)",
+        )
+        attach_msa = st.checkbox(
+            "Attach MSA to leaves (ETE4 viewer)",
+            value=False,
+            help="Show the aligned sequences next to leaves in the ETE4 interactive explorer.",
+        )
+        msa_range = st.text_input(
+            "MSA display range (optional)",
+            placeholder="e.g. 30:60 (alignment columns, 0-based)",
+            help="Show only alignment columns start:end in the MSA. Applies to "
+            "both the ETE4 viewer and the static image. Leave blank for the full alignment.",
+        )
+
         # --- INDEPENDENT CHECKBOXES ---
         use_ete4 = st.checkbox("Start ETE4 Interactive Server", value=False)
         ete4_port = st.number_input("ETE4 Port", value=5001) if use_ete4 else 5001
@@ -343,6 +375,9 @@ elif choice == "Phylogenetic Tree":
             show_domains = st.checkbox("Domain shapes", value=True, key="sl_domains")
             show_colors = st.checkbox("Branch colouring", value=True, key="sl_colors")
             show_gene = st.checkbox("Gene name labels", value=True, key="sl_gene")
+            show_msa = st.checkbox(
+                "Multiple sequence alignment", value=False, key="sl_msa"
+            )
 
     if st.button("Run Full Tree Pipeline", type="primary"):
 
@@ -435,6 +470,14 @@ elif choice == "Phylogenetic Tree":
             if no_ncbi:
                 cmd += ["--no_ncbi"]
 
+            cmd += ["--pfam_source", pfam_source]
+            cmd += ["--pfam_logic", pfam_logic]
+            cmd += ["--color_by", color_by]
+            if local_fasta and local_fasta.strip():
+                cmd += ["--local_fasta", local_fasta.strip()]
+            if msa_range and msa_range.strip():
+                cmd += ["--positions", msa_range.strip()]
+
             # Prevent Qt Crash
             run_env = os.environ.copy()
             run_env["QT_QPA_PLATFORM"] = "offscreen"
@@ -442,6 +485,8 @@ elif choice == "Phylogenetic Tree":
             # -------- A: USE ETE4 BACKGROUND SERVER ---------
             if use_ete4:
                 cmd += ["--port", str(int(ete4_port))]
+                if attach_msa:
+                    cmd += ["--MSA"]
                 with st.spinner(
                     f"Preparing ETE4 on port {ete4_port}. Alignment & Tree building may take 1-2 minutes..."
                 ):
@@ -487,6 +532,8 @@ elif choice == "Phylogenetic Tree":
                     layers.append("colors")
                 if st.session_state.get("sl_gene", True):
                     layers.append("gene")
+                if st.session_state.get("sl_msa", False):
+                    layers.append("msa")
 
                 cmd += ["--port", str(int(ete4_port))]
                 cmd += ["--render_ete_static"]

@@ -15,6 +15,7 @@ import os
 import sys
 import re
 import subprocess
+import shutil
 import hashlib
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -39,24 +40,56 @@ def get_fasta_from_db(
     evalue_cutoff=None,
     exclude_taxon_ids=None,
     max_per_taxon=None,
+    pfam_source="hmmsearch",
+    pfam_logic="or",
 ):
     taxid_ints = [int(t) for t in taxids] if taxids else None
-    seen = set()
+    seen = {}
+    acc2pfams = {}
     all_records = []
 
     with UniProtRetriever(get_db_config()) as db:
         for pfam in pfams:
-            records = db.get_proteins_by_hmm_hit(
-                version=version,
-                hmm_query=pfam,
-                evalue_cutoff=evalue_cutoff,
-                taxon_ids=taxid_ints,
-                exclude_taxon_ids=exclude_taxon_ids,
-            )
+            # uniprot source has no evalue/exclude filters
+            if pfam_source == "uniprot":
+                records = db.get_proteins(
+                    version=version,
+                    taxon_ids=taxid_ints,
+                    pfam_id=pfam,
+                )
+            else:
+                records = db.get_proteins_by_hmm_hit(
+                    version=version,
+                    hmm_query=pfam,
+                    evalue_cutoff=evalue_cutoff,
+                    taxon_ids=taxid_ints,
+                    exclude_taxon_ids=exclude_taxon_ids,
+                )
             for r in records:
-                if r["accession"] not in seen:
-                    seen.add(r["accession"])
-                    all_records.append(r)
+                acc = r["accession"]
+                if acc not in seen:
+                    seen[acc] = r
+                acc2pfams.setdefault(acc, set()).add(pfam)
+
+    if pfam_logic == "and" and len(pfams) > 1:
+        wanted = set(pfams)
+        all_records = [seen[a] for a in seen if acc2pfams[a] == wanted]
+        print(
+            "INFO--Multi-Pfam AND logic: %d proteins carry all %d Pfams %s"
+            % (len(all_records), len(pfams), ",".join(pfams))
+        )
+    else:
+        all_records = list(seen.values())
+
+    if len(pfams) > 1:
+        from collections import Counter
+
+        combo_counts = Counter(
+            "+".join(sorted(acc2pfams[r["accession"]])) for r in all_records
+        )
+        print("INFO--Pfam combination breakdown (proteins entering the tree):")
+        for combo, cnt in combo_counts.most_common():
+            print("       %-40s %d" % (combo, cnt))
 
     print("INFO--Retrieved %d unique sequences from local DB" % len(all_records))
 
@@ -131,6 +164,28 @@ if __name__ == "__main__":
     parser.add_argument("--version", required=True, type=str)
     parser.add_argument("--evalue", required=False, type=float, default=None)
     parser.add_argument("--local_fasta", required=False, type=str)
+    parser.add_argument(
+        "--pfam_source",
+        default="hmmsearch",
+        choices=["hmmsearch", "uniprot"],
+        help="Where to pull Pfam membership from: 'hmmsearch' = local Pfam-A "
+        "hmmsearch results (default), 'uniprot' = UniProt's own protein_pfam "
+        "assignments.",
+    )
+    parser.add_argument(
+        "--pfam_logic",
+        default="or",
+        choices=["or", "and"],
+        help="With >1 Pfam: 'or' = proteins matching any Pfam (default), "
+        "'and' = only proteins matching all Pfams.",
+    )
+    parser.add_argument(
+        "--color_by",
+        default="taxon",
+        choices=["taxon", "pfam"],
+        help="Branch colouring: 'taxon' = by taxonomy/lineage (default), "
+        "'pfam' = by which queried Pfam(s) each protein carries.",
+    )
     parser.add_argument("--MSA", action="store_true")
     parser.add_argument("--positions", required=False, type=str)
     parser.add_argument("--prefix", required=True, type=str)
@@ -200,6 +255,20 @@ if __name__ == "__main__":
                 f = line.strip().split("\t")
                 if len(f) >= 2:
                     seqid2gene[f[0]] = f[1]
+    elif args.get("local_fasta"):
+        # headers must be "{taxon_id}.{accession}"
+        with open(args["local_fasta"]) as src, open(filename_fasta, "w") as out:
+            out.write(src.read())
+        for head in get_seqs(filename_fasta):
+            seqid2gene[head] = "-"
+        filename_seqid2name = filename_fasta.replace(".fa", ".seqid2gname.tab")
+        with open(filename_seqid2name, "w") as out:
+            for seqid, gname in seqid2gene.items():
+                print("%s\t%s" % (seqid, gname), file=out)
+        print(
+            "INFO--Loaded %d sequences from local FASTA: %s"
+            % (len(seqid2gene), args["local_fasta"])
+        )
     else:
         if type(args["exclude_taxids"]) == str:
             if os.path.isfile(args["exclude_taxids"]):
@@ -225,6 +294,8 @@ if __name__ == "__main__":
             evalue_cutoff=args.get("evalue"),
             exclude_taxon_ids=exclude_taxids,
             max_per_taxon=args.get("max_per_taxon"),
+            pfam_source=args.get("pfam_source", "hmmsearch"),
+            pfam_logic=args.get("pfam_logic", "or"),
         )
         with open(filename_fasta, "w") as out:
             out.write(fasta)
@@ -233,16 +304,24 @@ if __name__ == "__main__":
             for seqid, gname in seqid2gene.items():
                 print("%s\t%s" % (seqid, gname), file=out)
 
-    aln_cpu = args["cpu"] if args["cpu"] != "AUTO" else 4
-    trimal_available = os.system("which trimal > /dev/null 2>&1") == 0
+    aln_cpu = str(args["cpu"]) if args["cpu"] != "AUTO" else "4"
+    trimal_available = shutil.which("trimal") is not None
 
     def run_trimal(filename_aln):
         filename_trimal = filename_aln + ".gt%s" % args["gt"].replace(".", "")
         if trimal_available:
             if not os.path.isfile(filename_trimal):
-                os.system(
-                    "trimal -in %s -out %s -gt %s"
-                    % (filename_aln, filename_trimal, args["gt"])
+                subprocess.run(
+                    [
+                        "trimal",
+                        "-in",
+                        filename_aln,
+                        "-out",
+                        filename_trimal,
+                        "-gt",
+                        args["gt"],
+                    ],
+                    check=True,
                 )
         else:
             filename_trimal = filename_aln
@@ -257,42 +336,97 @@ if __name__ == "__main__":
     if args["aln"] == "mafft":
         filename_aln = filename_fasta.replace(".fa", ".mft")
         if not os.path.isfile(filename_aln):
-            os.system(
-                "mafft --quiet --thread %s %s > %s"
-                % (aln_cpu, filename_fasta, filename_aln)
-            )
+            try:
+                with open(filename_aln, "w") as out:
+                    subprocess.run(
+                        ["mafft", "--quiet", "--thread", aln_cpu, filename_fasta],
+                        stdout=out,
+                        check=True,
+                    )
+            except subprocess.CalledProcessError:
+                if os.path.isfile(filename_aln):
+                    os.remove(filename_aln)
+                sys.exit("ERROR--mafft alignment failed.")
         filename_trimal = run_trimal(filename_aln)
     elif args["aln"] == "einsi":
         filename_aln = filename_fasta.replace(".fa", ".einsi")
         if not os.path.isfile(filename_aln):
-            os.system(
-                "einsi --thread %s %s > %s" % (aln_cpu, filename_fasta, filename_aln)
-            )
+            try:
+                with open(filename_aln, "w") as out:
+                    subprocess.run(
+                        ["einsi", "--thread", aln_cpu, filename_fasta],
+                        stdout=out,
+                        check=True,
+                    )
+            except subprocess.CalledProcessError:
+                if os.path.isfile(filename_aln):
+                    os.remove(filename_aln)
+                sys.exit("ERROR--einsi alignment failed.")
         filename_trimal = run_trimal(filename_aln)
     elif args["aln"] == "clustalo":
         filename_aln = filename_fasta.replace(".fa", ".clustalo")
         if not os.path.isfile(filename_aln):
-            os.system(
-                "clustalo --threads %s -i %s -o %s"
-                % (aln_cpu, filename_fasta, filename_aln)
-            )
+            try:
+                subprocess.run(
+                    [
+                        "clustalo",
+                        "--threads",
+                        aln_cpu,
+                        "-i",
+                        filename_fasta,
+                        "-o",
+                        filename_aln,
+                    ],
+                    check=True,
+                )
+            except subprocess.CalledProcessError:
+                if os.path.isfile(filename_aln):
+                    os.remove(filename_aln)
+                sys.exit("ERROR--clustalo alignment failed.")
         filename_trimal = run_trimal(filename_aln)
+
+    # ===========================================================================================================================
+
+    #                                                       TREE BUILDING
+
+    # ===========================================================================================================================
 
     if args["ml"] == "fasttree":
         filename_tree = filename_trimal + ".lg.fasttree"
         if not os.path.isfile(filename_tree):
-            ret = os.system("fasttree -lg %s > %s" % (filename_trimal, filename_tree))
-            if ret != 0:
-                sys.exit(1)
+            try:
+                with open(filename_tree, "w") as out:
+                    subprocess.run(
+                        ["fasttree", "-lg", filename_trimal],
+                        stdout=out,
+                        check=True,
+                    )
+            except subprocess.CalledProcessError:
+                if os.path.isfile(filename_tree):
+                    os.remove(filename_tree)
+                sys.exit("ERROR--FastTree failed.")
     elif args["ml"] == "iqtree":
         filename_tree = filename_trimal + ".treefile"
         if not os.path.isfile(filename_tree):
-            ret = os.system(
-                "iqtree -s %s --prefix %s -mset LG -B 1000 -T %s"
-                % (filename_trimal, filename_trimal, args["cpu"])
-            )
-            if ret != 0:
-                sys.exit(1)
+            try:
+                subprocess.run(
+                    [
+                        "iqtree",
+                        "-s",
+                        filename_trimal,
+                        "--prefix",
+                        filename_trimal,
+                        "-mset",
+                        "LG",
+                        "-B",
+                        "1000",
+                        "-T",
+                        aln_cpu,
+                    ],
+                    check=True,
+                )
+            except subprocess.CalledProcessError:
+                sys.exit("ERROR--IQ-TREE failed.")
 
     print("INFO--Loading tree in %s" % filename_tree)
 
@@ -425,6 +559,41 @@ if __name__ == "__main__":
                     f"INFO--iTOL domains file written: {filename_tree}.itol_domains.txt"
                 )
 
+            # optional MSA display window from --positions ("start:end")
+            msa_start, msa_end = None, None
+            if args.get("positions"):
+                sep = ":" if ":" in args["positions"] else "-"
+                parts = args["positions"].split(sep)
+                if len(parts) == 2:
+                    msa_start = int(parts[0]) if parts[0].strip() else None
+                    msa_end = int(parts[1]) if parts[1].strip() else None
+
+            # map each leaf to the queried Pfams it carries
+            color_by = args.get("color_by", "taxon")
+            acc2combo = {}
+            for acc, hits in domain_dict.items():
+                matched = []
+                for p in pfams:
+                    for d in hits:
+                        if d["hmm_name"] == p or str(
+                            d.get("hmm_accession", "")
+                        ).startswith(p):
+                            matched.append(p)
+                            break
+                acc2combo[acc] = "+".join(matched) if matched else "none"
+            combo_colors = {
+                combo: _domain_color(combo) for combo in set(acc2combo.values())
+            }
+            if len(pfams) > 1 and acc2combo:
+                combo_file = filename_tree + ".pfam_combinations.tab"
+                with open(combo_file, "w") as cf:
+                    for n in t.leaves():
+                        acc = n.name.split(".", 1)[1] if "." in n.name else n.name
+                        cf.write(
+                            "%s\t%s\t%s\n" % (n.name, acc, acc2combo.get(acc, "none"))
+                        )
+                print(f"INFO--Pfam combination table written: {combo_file}")
+
             # ---------------------------------------------------------------------------------------
             # MODE A: STATIC PNG GENERATOR WITH DOMAINS DISPLAYED
             # ---------------------------------------------------------------------------------------
@@ -432,10 +601,10 @@ if __name__ == "__main__":
                 print("INFO--Generating static tree image with custom domain shapes...")
 
                 t_static = t.copy()
-                name2seq = (
-                    get_seqs(filename_aln)
-                    if (args.get("MSA") and os.path.isfile(filename_aln))
-                    else get_seqs(filename_fasta)
+                # unaligned for domain coords, aligned for the MSA layer
+                name2seq = get_seqs(filename_fasta)
+                name2aln = (
+                    get_seqs(filename_aln) if os.path.isfile(filename_aln) else {}
                 )
 
                 # Parse layer flags
@@ -489,20 +658,41 @@ if __name__ == "__main__":
 
                 for node in t_static.traverse():
 
-                    # --- Branch colouring ---
-                    if "colors" in static_layers and auto_colormap:
-                        taxid = node.name.split(".")[0] if node.is_leaf else None
-                        if not taxid and "lineage" in node.props:
-                            for tid in node.props["lineage"][::-1]:
-                                if str(tid) in auto_colormap:
-                                    taxid = str(tid)
-                                    break
-                        if taxid and taxid in auto_colormap:
-                            nstyle = NodeStyle()
-                            nstyle["vt_line_color"] = auto_colormap[taxid]
-                            nstyle["hz_line_color"] = auto_colormap[taxid]
-                            nstyle["fgcolor"] = auto_colormap[taxid]
-                            node.set_style(nstyle)
+                    nstyle = NodeStyle()
+                    nstyle["hz_line_width"] = 4
+                    nstyle["vt_line_width"] = 4
+                    nstyle["size"] = 0
+
+                    col = None
+                    if color_by == "pfam" and combo_colors:
+                        if node.is_leaf:
+                            acc = (
+                                node.name.split(".", 1)[1]
+                                if "." in node.name
+                                else node.name
+                            )
+                            key = acc2combo.get(acc)
+                        else:
+                            keys = {
+                                acc2combo.get(
+                                    l.name.split(".", 1)[1] if "." in l.name else l.name
+                                )
+                                for l in node.leaves()
+                            }
+                            key = next(iter(keys)) if len(keys) == 1 else None
+                        col = combo_colors.get(key) if key else None
+                    elif "colors" in static_layers and auto_colormap:
+                        if node.is_leaf:
+                            key = node.name.split(".")[0]
+                        else:
+                            keys = {l.name.split(".")[0] for l in node.leaves()}
+                            key = next(iter(keys)) if len(keys) == 1 else None
+                        col = auto_colormap.get(key) if key else None
+
+                    if col:
+                        nstyle["vt_line_color"] = col
+                        nstyle["hz_line_color"] = col
+                    node.set_style(nstyle)
 
                     if node.is_leaf:
                         name_parts = node.name.split(".")
@@ -549,8 +739,9 @@ if __name__ == "__main__":
 
                         # --- MSA aligned sequences ---
                         if "msa" in static_layers:
-                            seq = name2seq.get(node.name, None)
+                            seq = name2aln.get(node.name, None)
                             if seq:
+                                seq = seq[msa_start:msa_end]
                                 node.add_face(
                                     SeqMotifFace(seq, motifs=[], seq_format="seq"),
                                     column=2,
@@ -603,6 +794,7 @@ if __name__ == "__main__":
                         return
                     seq = node.props.get("seq")
                     if seq:
+                        seq = seq[msa_start:msa_end]
                         return [
                             SeqFace(seq, seqtype="aa", position="aligned", column=4)
                         ]
@@ -667,22 +859,83 @@ if __name__ == "__main__":
                 name2seq = {}
                 if args.get("MSA") and os.path.isfile(filename_aln):
                     name2seq = get_seqs(filename_aln)
-                seq_layout = Layout(name="MSA", active=False, draw_node=layout_seqface)
+                seq_layout = Layout(
+                    name="MSA",
+                    active=bool(args.get("MSA")),
+                    draw_node=layout_seqface,
+                )
 
-                # ATTACH LABELS DIRECTLY TO NODES
+                def _draw_branch_color(node):
+                    style = {"stroke-width": 5}
+                    col = node.props.get("branch_color")
+                    if col:
+                        style["stroke"] = col
+                    return {"hz-line": style, "vt-line": style}
+
+                branch_color_layout = Layout(
+                    name="Branch colors", active=True, draw_node=_draw_branch_color
+                )
+
+                interactive_colormap = dict(colormap) if colormap else {}
+                if color_by == "taxon" and not interactive_colormap:
+                    distinct_palette = [
+                        "#e6194B",
+                        "#3cb44b",
+                        "#ffe119",
+                        "#4363d8",
+                        "#f58231",
+                        "#911eb4",
+                        "#42d4f4",
+                        "#f032e6",
+                        "#bfef45",
+                        "#469990",
+                        "#dcbeff",
+                        "#9A6324",
+                        "#800000",
+                        "#aaffc3",
+                        "#808000",
+                        "#ffd8b1",
+                        "#000075",
+                        "#a9a9a9",
+                    ]
+                    unique_taxids = sorted({n.name.split(".")[0] for n in t.leaves()})
+                    interactive_colormap = {
+                        tid: distinct_palette[i % len(distinct_palette)]
+                        for i, tid in enumerate(unique_taxids)
+                    }
 
                 for node in t.traverse():
-                    if colormap and "lineage" in node.props:
-                        for taxid in node.props["lineage"][::-1]:
-                            if str(taxid) in colormap:
-                                node.add_prop("color", colormap[str(taxid)])
-                                break
+                    col = None
+                    if color_by == "pfam" and combo_colors:
+                        if node.is_leaf:
+                            acc = (
+                                node.name.split(".", 1)[1]
+                                if "." in node.name
+                                else node.name
+                            )
+                            key = acc2combo.get(acc)
+                        else:
+                            keys = {
+                                acc2combo.get(
+                                    l.name.split(".", 1)[1] if "." in l.name else l.name
+                                )
+                                for l in node.leaves()
+                            }
+                            key = next(iter(keys)) if len(keys) == 1 else None
+                        col = combo_colors.get(key) if key else None
+                    elif color_by == "taxon" and interactive_colormap:
+                        if node.is_leaf:
+                            key = node.name.split(".")[0]
+                        else:
+                            keys = {l.name.split(".")[0] for l in node.leaves()}
+                            key = next(iter(keys)) if len(keys) == 1 else None
+                        col = interactive_colormap.get(key) if key else None
+                    if col:
+                        node.add_prop("branch_color", col)
                     if node.is_leaf:
                         node.add_prop("gene_name", seqid2gene.get(node.name, "-"))
                         if args.get("MSA") and node.name in name2seq:
                             node.add_prop("seq", name2seq[node.name])
-                            # node.add_face(SeqFace(name2seq[node.name], seqtype='aa'),
-                            #             column=3, position='aligned')
 
                 # ATTACH NODE PATHS FOR GUI VERIFICATION
                 def attach_paths(node, current_path=""):
@@ -694,7 +947,13 @@ if __name__ == "__main__":
                 attach_paths(t)
 
                 t.explore(
-                    layouts=[BASIC_LAYOUT, leaf_name_layout, domain_layout, seq_layout],
+                    layouts=[
+                        BASIC_LAYOUT,
+                        leaf_name_layout,
+                        domain_layout,
+                        seq_layout,
+                        branch_color_layout,
+                    ],
                     keep_server=True,
                     quiet=True,
                     port=args["port"],
