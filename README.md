@@ -155,6 +155,9 @@ Called by the GUI as a subprocess. Fetches sequences from the DB, aligns them, a
 | `--prefix` | Full path + run name for all output files | required |
 | `--taxids` | NCBI taxon IDs to include, comma-separated or path to txt file | all taxa |
 | `--exclude_taxids` | NCBI taxon IDs to exclude, comma-separated or txt file | none |
+| `--local_fasta` | Skip DB query and use a local FASTA file instead. Headers must be `{taxon_id}.{accession}`. | none |
+| `--pfam_source` | Where to pull Pfam membership from: `hmmsearch` (local Pfam-A results, default) or `uniprot` (UniProt's own assignments). | `hmmsearch` |
+| `--pfam_logic` | With >1 Pfam: `or` = proteins matching any Pfam, `and` = only proteins matching all Pfams. | `or` |
 | `--aln` | Alignment tool: `mafft`, `einsi`, `clustalo` | `mafft` |
 | `--ml` | Tree method: `fasttree`, `iqtree` | `fasttree` |
 | `--gt` | TrimAl gap threshold | `0.01` |
@@ -162,7 +165,9 @@ Called by the GUI as a subprocess. Fetches sequences from the DB, aligns them, a
 | `--evalue` | E-value cutoff for HMM hits | none |
 | `--max_per_taxon` | Keep at most N sequences per taxon before alignment (keeps large gene families manageable) | none |
 | `--colormap` | Path to a `taxid<TAB>color` file for the taxon colour strip (otherwise auto-assigned) | none |
-| `--no_ncbi` | Skip NCBI taxonomy annotation (faster) | off |
+| `--color_by` | Branch colouring: `taxon` (by taxonomy/lineage, default) or `pfam` (by which queried Pfam(s) each protein carries). | `taxon` |
+| `--positions` | MSA column window to display in the ETE viewer: `start:end` or `start-end`. | none |
+| `--no_ncbi` | Skip NCBI taxonomy annotation (`annotate_ncbi_taxa()`). Skips enriching nodes with `sci_name`, `rank`, and lineage. Use when speed matters more than taxonomy labels. | off |
 | `--no_explore` | Build tree files only, no viewer | off |
 | `--render_ete_static` | Render static PNG with domain shapes using ETE4 | off |
 | `--static_layers` | Layers to include in static PNG: `names,domains,colors,gene,msa` | all |
@@ -170,6 +175,10 @@ Called by the GUI as a subprocess. Fetches sequences from the DB, aligns them, a
 | `--use_resolved` | Load the pre-resolved `.resolved.nwk` instead of re-rooting/resolving on the fly, so ETE explorer node numbering matches the subclade partitioner | off |
 | `--port` | Port for ETE4 interactive server | `5001` |
 | `--output_dir` | Directory for all output files (alternative to full path in `--prefix`) | none |
+
+**NCBI taxonomy annotation**: unless `--no_ncbi` is set, the interactive explorer calls `t.annotate_ncbi_taxa()` on the ETE4 `PhyloTree`. This enriches every node with NCBI-derived properties (`sci_name`, `taxid`, `rank`, and the full lineage), which appear in the node popup and are used for `taxon`-mode branch colouring. The `sp_naming_function` passed to `PhyloTree` extracts the taxon ID from the `{taxid}.{accession}` leaf name format to drive this lookup.
+
+**Node path annotation**: every node in the interactive explorer receives a `node_path` property (e.g. `"0,1,2"` = root → first child → second child → third child). This is attached automatically via `attach_paths()` before `t.explore()`. The value is visible in the node popup, and is the same path format accepted by `subclade_partition.partition_by_node_path()` — so you can click any internal node in the viewer, read its path, and paste it directly into the partitioner.
 
 One liner examples to call from CLI:
 1. Build tree only (no viewer, fastest)
@@ -268,6 +277,22 @@ python tree_from_db.py \
   --gt 0.01 \
   --cpu 8 \
   --evalue 1e-5 \
+  --no_ncbi \
+  --no_explore
+```
+
+7. Use a local FASTA instead of querying the DB (headers must be `{taxid}.{accession}`)
+
+```bash
+python tree_from_db.py \
+  --pfam PF00041 \
+  --version 2026_01 \
+  --prefix /home/user/results/myrun \
+  --local_fasta /home/user/sequences/my_proteins.fa \
+  --aln mafft \
+  --ml fasttree \
+  --gt 0.01 \
+  --cpu 8 \
   --no_ncbi \
   --no_explore
 ```
