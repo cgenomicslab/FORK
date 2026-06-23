@@ -648,6 +648,9 @@ if __name__ == "__main__":
                         tid: distinct_palette[i % len(distinct_palette)]
                         for i, tid in enumerate(unique_taxids)
                     }
+                    # user-supplied colormap (taxid -> color) overrides the palette
+                    if colormap:
+                        auto_colormap.update(colormap)
 
                 def _get_static_shape(domain_name):
                     shapes = ["[]", "()", "<>", "^", "v", "o"]
@@ -933,7 +936,18 @@ if __name__ == "__main__":
                     if col:
                         node.add_prop("branch_color", col)
                     if node.is_leaf:
+                        parts = node.name.split(".", 1)
+                        acc = parts[1] if len(parts) > 1 else node.name
+                        node.add_prop("taxid", parts[0])
+                        node.add_prop("accession", acc)
                         node.add_prop("gene_name", seqid2gene.get(node.name, "-"))
+                        if acc in acc2combo:
+                            node.add_prop("pfam_combo", acc2combo[acc])
+                        if domain_dict.get(acc):
+                            node.add_prop(
+                                "domains",
+                                ", ".join(d["hmm_name"] for d in domain_dict[acc]),
+                            )
                         if args.get("MSA") and node.name in name2seq:
                             node.add_prop("seq", name2seq[node.name])
 
@@ -959,6 +973,18 @@ if __name__ == "__main__":
                     port=args["port"],
                     host="0.0.0.0",
                     show_leaf_name=True,
+                    show_popup_props=[
+                        "name",
+                        "sci_name",
+                        "taxid",
+                        "accession",
+                        "gene_name",
+                        "pfam_combo",
+                        "domains",
+                        "rank",
+                        "dist",
+                        "support",
+                    ],
                 )
 
         except Exception as e:

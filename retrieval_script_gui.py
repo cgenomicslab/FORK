@@ -346,6 +346,13 @@ elif choice == "Phylogenetic Tree":
             ["taxon", "pfam"],
             help="taxon = by lineage; pfam = by which queried Pfam(s) each protein carries.",
         )
+        colormap_upload = st.file_uploader(
+            "Custom colormap (optional)",
+            type=["txt", "tsv", "tab"],
+            help="Two columns per line: taxid <tab/space> color (e.g. 9606  #e6194B). "
+            "Overrides the automatic palette for taxon colouring.",
+            key="tree_colormap_upload",
+        )
         local_fasta = st.text_input(
             "Local FASTA path (optional)",
             placeholder="/path/to/seqs.fa (headers as taxid.accession)",
@@ -477,6 +484,15 @@ elif choice == "Phylogenetic Tree":
                 cmd += ["--local_fasta", local_fasta.strip()]
             if msa_range and msa_range.strip():
                 cmd += ["--positions", msa_range.strip()]
+            if colormap_upload is not None:
+                import tempfile
+
+                cmap_tmp = tempfile.NamedTemporaryFile(
+                    mode="wb", suffix=".colormap.txt", delete=False
+                )
+                cmap_tmp.write(colormap_upload.getvalue())
+                cmap_tmp.close()
+                cmd += ["--colormap", cmap_tmp.name]
 
             # Prevent Qt Crash
             run_env = os.environ.copy()
@@ -1378,6 +1394,8 @@ elif choice == "High-Resolution Phylogenetic Profile":
             )
             if tax_file is not None:
                 st.session_state["hrp_tax_content"] = tax_file.getvalue().decode()
+            else:
+                st.session_state["hrp_tax_content"] = ""
 
             exclude_tax = st.text_input(
                 "Exclude Taxonomy IDs (comma separated, optional)",
@@ -1390,6 +1408,8 @@ elif choice == "High-Resolution Phylogenetic Profile":
                 st.session_state["hrp_excl_content"] = (
                     exclude_tax_file.getvalue().decode()
                 )
+            else:
+                st.session_state["hrp_excl_content"] = ""
 
         tree_output_root = st.text_input(
             "Tree output / cache directory",
@@ -1428,22 +1448,32 @@ elif choice == "High-Resolution Phylogenetic Profile":
                 taxids_text + "\n" + st.session_state.get("hrp_tax_content", "")
             )
             taxids = []
-            for tok in tax_combined.replace(",", " ").split():
-                try:
-                    taxids.append(int(tok))
-                except ValueError:
-                    pass
+            for line in tax_combined.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                for tok in line.replace(",", " ").split():
+                    try:
+                        taxids.append(int(tok))
+                    except ValueError:
+                        pass
+            taxids = sorted(set(taxids))
 
             # Combine exclude taxid text input + uploaded file content
             excl_combined = (
                 exclude_tax + "\n" + st.session_state.get("hrp_excl_content", "")
             )
             exclude_taxids = []
-            for tok in excl_combined.replace(",", " ").split():
-                try:
-                    exclude_taxids.append(int(tok))
-                except ValueError:
-                    pass
+            for line in excl_combined.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                for tok in line.replace(",", " ").split():
+                    try:
+                        exclude_taxids.append(int(tok))
+                    except ValueError:
+                        pass
+            exclude_taxids = sorted(set(exclude_taxids))
 
             if not pfams:
                 st.error("Please supply at least one Pfam ID or HMM name.")
@@ -1478,6 +1508,17 @@ elif choice == "High-Resolution Phylogenetic Profile":
                 st.session_state["hrp_profile_output"] = None
                 st.session_state["hrp_build_version"] = version
                 st.session_state["hrp_build_taxids"] = taxids
+                st.session_state["hrp_build_params"] = {
+                    "version": version,
+                    "taxids": sorted(taxids) if taxids else None,
+                    "exclude_taxids": (
+                        sorted(exclude_taxids) if exclude_taxids else None
+                    ),
+                    "evalue": float(evalue) if evalue else None,
+                    "aln": aln,
+                    "ml": ml,
+                    "gt": gt,
+                }
 
                 st.rerun()
 
@@ -1502,12 +1543,25 @@ elif choice == "High-Resolution Phylogenetic Profile":
                     ),
                     "Cached": "yes" if r["cached"] else "no",
                     "Leaves": len(r["leaves"]),
+                    "Cache key": r.get("cache_key", ""),
                     "Tree path": r["tree_path"] or "(none)",
                 }
             )
         st.dataframe(
             pd.DataFrame(summary_rows), use_container_width=True, hide_index=True
         )
+
+        with st.expander(
+            "Cache-key inputs (a tree is reused only when all of these match)",
+            expanded=False,
+        ):
+            st.caption(
+                "The folder hash is computed from exactly these values. A new "
+                "folder / a re-build means one of them changed since last time — "
+                "most often the taxid set (typed text merged with a previously "
+                "uploaded file) or an Advanced option (gt / aligner / tree method)."
+            )
+            st.json(st.session_state.get("hrp_build_params", {}))
 
         failed = [p for p, r in results.items() if r["error"]]
         if failed:
@@ -1518,6 +1572,130 @@ elif choice == "High-Resolution Phylogenetic Profile":
                     st.markdown(f"**{p}**")
                     st.code(
                         results[p]["stderr"] or "(no stderr captured)", language="text"
+                    )
+
+        # -------------------------------------------------------------
+        # SECTION 2b: Species (NCBI) tree
+        # -------------------------------------------------------------
+        with st.expander("2b. Species (NCBI) tree", expanded=False):
+            st.caption(
+                "Static NCBI taxonomy tree of the taxa in these gene trees — a "
+                "reference species topology to compare against the gene trees."
+            )
+            sp_cmap_upload = st.file_uploader(
+                "Custom colormap (optional)",
+                type=["txt", "tsv", "tab"],
+                help="taxid <tab/space> color per line. Overrides the auto palette.",
+                key="hrp_sp_colormap",
+            )
+            if st.button("Render species tree", key="hrp_species_btn"):
+                sp_taxids = list(st.session_state.get("hrp_build_taxids") or [])
+                if not sp_taxids:
+                    seen_t = set()
+                    for r in results.values():
+                        for leaf in r.get("leaves", []):
+                            seen_t.add(leaf.split(".")[0])
+                    sp_taxids = sorted(seen_t)
+                sp_taxids = [str(x) for x in sp_taxids if str(x).isdigit()]
+
+                if len(set(sp_taxids)) < 2:
+                    st.warning("Need at least 2 valid taxids to build a species tree.")
+                else:
+                    sp_colormap = {}
+                    if sp_cmap_upload is not None:
+                        for line in sp_cmap_upload.getvalue().decode().splitlines():
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                sp_colormap[parts[0]] = parts[1]
+                    try:
+                        with st.spinner("Building NCBI topology and rendering..."):
+                            os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+                            from ete4 import NCBITaxa
+                            from ete4.treeview import TreeStyle, NodeStyle, TextFace
+
+                            ncbi = NCBITaxa()
+                            sp_tree = ncbi.get_topology(
+                                sp_taxids, intermediate_nodes=False
+                            )
+                            for n in sp_tree.traverse():
+                                n.dist = 0.0
+                            sp_tree.to_ultrametric(topological=True)
+
+                            palette = [
+                                "#e6194B",
+                                "#3cb44b",
+                                "#ffe119",
+                                "#4363d8",
+                                "#f58231",
+                                "#911eb4",
+                                "#42d4f4",
+                                "#f032e6",
+                                "#bfef45",
+                                "#469990",
+                                "#dcbeff",
+                                "#9A6324",
+                                "#800000",
+                                "#aaffc3",
+                                "#808000",
+                                "#ffd8b1",
+                                "#000075",
+                                "#a9a9a9",
+                            ]
+                            leaf_taxids = sorted({l.name for l in sp_tree.leaves()})
+                            auto_cmap = {
+                                tid: palette[i % len(palette)]
+                                for i, tid in enumerate(leaf_taxids)
+                            }
+                            auto_cmap.update(sp_colormap)
+
+                            for node in sp_tree.traverse():
+                                nstyle = NodeStyle()
+                                nstyle["hz_line_width"] = 4
+                                nstyle["vt_line_width"] = 4
+                                nstyle["size"] = 0
+                                if node.is_leaf:
+                                    col = auto_cmap.get(node.name)
+                                else:
+                                    leaf_cols = {
+                                        auto_cmap.get(l.name) for l in node.leaves()
+                                    }
+                                    col = (
+                                        next(iter(leaf_cols))
+                                        if len(leaf_cols) == 1
+                                        else None
+                                    )
+                                if col:
+                                    nstyle["hz_line_color"] = col
+                                    nstyle["vt_line_color"] = col
+                                node.set_style(nstyle)
+                                if node.is_leaf:
+                                    label = node.props.get("sci_name", node.name)
+                                    node.add_face(
+                                        TextFace(f"  {label} ({node.name})"),
+                                        column=0,
+                                        position="branch-right",
+                                    )
+
+                            ts = TreeStyle()
+                            ts.show_leaf_name = False
+                            out_root = st.session_state.get("hrp_output_root", ".")
+                            os.makedirs(out_root, exist_ok=True)
+                            sp_img = os.path.join(out_root, "species_tree.png")
+                            sp_tree.render(sp_img, w=2000, units="px", tree_style=ts)
+                            st.session_state["hrp_species_img"] = sp_img
+                    except Exception as e:
+                        st.error(f"Species tree render failed: {e}")
+
+            sp_img = st.session_state.get("hrp_species_img")
+            if sp_img and os.path.isfile(sp_img):
+                st.image(sp_img, use_container_width=True)
+                with open(sp_img, "rb") as f:
+                    st.download_button(
+                        "Download Species Tree (.png)",
+                        data=f.read(),
+                        file_name="species_tree.png",
+                        mime="image/png",
+                        key="hrp_species_dl",
                     )
 
         # -------------------------------------------------------------
@@ -1931,6 +2109,43 @@ elif choice == "High-Resolution Phylogenetic Profile":
                 st.session_state["hrp_profile_log"] = log_scale
                 st.session_state["hrp_profile_cluster_cols"] = cluster_cols
 
+                # per-subclade protein FASTA (one record per accession, grouped
+                # by Pfam and subclade label in the header)
+                all_accs = sorted(
+                    {
+                        a
+                        for sub in pfam_subclade_map.values()
+                        for accs in sub.values()
+                        for a in accs
+                    }
+                )
+                recs = uni.fetch_sequences_by_accession(
+                    st.session_state.get("hrp_build_version", "2026_01"),
+                    all_accs,
+                    db_config=config,
+                )
+                acc2rec = {r["accession"]: r for r in recs}
+                fa_lines = []
+                for pf, sub in pfam_subclade_map.items():
+                    for label, accs in sub.items():
+                        for acc in sorted(accs):
+                            r = acc2rec.get(acc)
+                            if r:
+                                fa_lines.append(
+                                    ">%s.%s|%s|subclade_%s %s\n%s"
+                                    % (
+                                        r["taxon_id"],
+                                        acc,
+                                        pf,
+                                        label,
+                                        r.get("organism", ""),
+                                        r["sequence"],
+                                    )
+                                )
+                st.session_state["hrp_subclade_fasta"] = (
+                    "\n".join(fa_lines) + "\n" if fa_lines else ""
+                )
+
             profile_output = st.session_state.get("hrp_profile_output", None)
 
             if profile_output is None:
@@ -1979,7 +2194,7 @@ elif choice == "High-Resolution Phylogenetic Profile":
                 st.dataframe(display_matrix, use_container_width=True)
 
                 # Downloads + reset
-                dl1, dl2, dl3 = st.columns(3)
+                dl1, dl2, dl3, dl4 = st.columns(4)
                 with dl1:
                     st.download_button(
                         "Download Matrix (.csv)",
@@ -1989,6 +2204,16 @@ elif choice == "High-Resolution Phylogenetic Profile":
                         key="hrp_dl_csv",
                     )
                 with dl2:
+                    fa = st.session_state.get("hrp_subclade_fasta", "")
+                    st.download_button(
+                        "Download Subclade FASTA",
+                        data=fa.encode(),
+                        file_name="subclade_proteins.fasta",
+                        mime="text/plain",
+                        key="hrp_dl_fasta",
+                        disabled=not fa,
+                    )
+                with dl3:
                     st.download_button(
                         "Download Heatmap (.png)",
                         data=buf.getvalue(),
@@ -1996,7 +2221,7 @@ elif choice == "High-Resolution Phylogenetic Profile":
                         mime="image/png",
                         key="hrp_dl_png",
                     )
-                with dl3:
+                with dl4:
                     if st.button("Reset entire tab", key="hrp_reset_btn"):
                         for k in list(st.session_state.keys()):
                             if k.startswith("hrp_"):
