@@ -1,6 +1,6 @@
 # UniProt Lab Manager
 
-A Streamlit app for querying, visualizing, and comparing proteins across a **local UniProt Reference Proteomes database** enriched with Pfam-A HMM search results. Built at CGLab — no internet needed for queries once the database is set up.
+A Flask web app for querying, visualizing, and comparing proteins across a **local UniProt Reference Proteomes database** enriched with Pfam-A HMM search results. Built at CGLab — no internet needed for queries once the database is set up.
 
 ![home tab](figures/home_tab.png)
 
@@ -53,10 +53,12 @@ Or fill in the **DB Config** panel in the Streamlit sidebar at runtime.
 ### 4. Run
 
 ```bash
-python -m streamlit run homepage.py
+bash run_webapp.sh
+# or directly:
+python app.py
 ```
 
-Open `http://localhost:8501`.
+Open `http://localhost:5000`.
 
 ---
 
@@ -140,16 +142,24 @@ Columns are `Pfam·Subclade` pairs; the color stripe groups subclades by parent 
 ## Repository structure
 
 ```
-uniprot-lab-manager/
-├── homepage.py                       # Entry point — run with Streamlit
-├── pages/
-│   └── retrieval_script_gui.py       # All tabs (GUI logic)
+uniprot-lab-manager-copy/
+├── app.py                            # Entry point — Flask app
+├── run_webapp.sh                     # Convenience launcher
+├── templates/                        # HTML templates (Jinja2)
+│   ├── base.html
+│   ├── index.html
+│   ├── tree.html
+│   ├── presence.html
+│   ├── highres.html
+│   └── utilities.html
+├── static/                           # CSS / JS assets
 ├── get_reference_uniprot_set_lib.py  # Backend retrieval library (importable)
 ├── tree_from_db.py                   # CLI: fetch → align → tree → viewer
 ├── subclade_partition.py             # Partition gene trees into subclades
 ├── tree_builder.py                   # Per-Pfam tree orchestration + caching
 ├── interactive_tree_component.py     # D3-based tree viewer (HTML/JS)
 ├── viz_utils.py                      # Heatmap, domain diagram, tree rendering
+├── utils.py                          # Shared helpers
 ├── figures/                          # Screenshots for README
 └── setup/                            # One-time DB build scripts (admin only)
     ├── uniprot_sync_v7.py
@@ -161,7 +171,7 @@ uniprot-lab-manager/
 ## Requirements
 
 ```
-streamlit, pandas, matplotlib, seaborn, biopython,
+flask, pandas, matplotlib, seaborn, biopython,
 mysql-connector-python, python-dotenv, ete4>=4.4.0, numpy
 ```
 
