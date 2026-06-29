@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+
+{% block title %}Utilities — UniProt Lab Manager{% endblock %}
+
+{% block page_header %}
+<h1>Utilities</h1>
+<p>Standalone tools for sequence retrieval, HMM search, accession lookup, domain analysis, and branch extraction.</p>
+{% endblock %}
+
+{% block content %}
+
+<div id="util-alert" class="hidden" style="margin-bottom:16px;"></div>
+
+<!-- Standard Retrieval -->
+<details class="expander" open>
+  <summary>Standard Sequence Retrieval</summary>
+  <div class="expander-body">
+    <div class="form-row" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label for="sr-ver">UniProt Version</label>
+        <input type="text" id="sr-ver" value="2026_01">
+      </div>
+      <div class="form-group">
+        <label for="sr-tax">Taxonomy IDs (comma separated)</label>
+        <input type="text" id="sr-tax" placeholder="e.g. 9606, 10090">
+      </div>
+    </div>
+    <div class="form-row" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label for="sr-proteome">Proteome ID (optional)</label>
+        <input type="text" id="sr-proteome" placeholder="e.g. UP000005640">
+      </div>
+      <div class="form-group">
+        <label for="sr-go">GO ID (optional)</label>
+        <input type="text" id="sr-go" placeholder="e.g. GO:0005634">
+      </div>
+      <div class="form-group">
+        <label for="sr-pfam">Pfam ID (optional)</label>
+        <input type="text" id="sr-pfam" placeholder="e.g. PF00046">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="fetchSequences()">Fetch Sequences</button>
+    <div id="sr-results" class="hidden" style="margin-top:16px;">
+      <div id="sr-count" class="text-muted text-sm" style="margin-bottom:8px;"></div>
+      <div id="sr-table"></div>
+      <div class="download-bar" style="margin-top:10px;padding:0;">
+        <button class="btn btn-secondary btn-sm" id="sr-dl-fasta" onclick="">Download FASTA</button>
+      </div>
+    </div>
+  </div>
+</details>
+
+<!-- HMM Search -->
+<details class="expander">
+  <summary>HMM Hit Retrieval</summary>
+  <div class="expander-body">
+    <div class="form-row" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label for="hmm-ver">UniProt Version</label>
+        <input type="text" id="hmm-ver" value="2026_01">
+      </div>
+      <div class="form-group">
+        <label for="hmm-query">HMM Name or Accession</label>
+        <input type="text" id="hmm-query" placeholder="e.g. Homeodomain or PF00046">
+      </div>
+    </div>
+    <div class="form-row" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label for="hmm-tax">Taxonomy Filter (optional, comma separated)</label>
+        <input type="text" id="hmm-tax" placeholder="e.g. 9606, 10090">
+      </div>
+      <div class="form-group">
+        <label for="hmm-evalue">E-value cutoff (optional)</label>
+        <input type="number" id="hmm-evalue" placeholder="e.g. 1e-5" step="any">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="hmmSearch()">Run HMM Search</button>
+    <div id="hmm-results" class="hidden" style="margin-top:16px;">
+      <div id="hmm-count" class="text-muted text-sm" style="margin-bottom:8px;"></div>
+      <div id="hmm-table"></div>
+      <div style="margin-top:10px;">
+        <button class="btn btn-secondary btn-sm" id="hmm-dl-fasta">Download FASTA</button>
+      </div>
+    </div>
+  </div>
+</details>
+
+<!-- Accession Lookup -->
+<details class="expander">
+  <summary>Accession / Protein Name Lookup</summary>
+  <div class="expander-body">
+    <div class="form-row" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label for="acc-ver">UniProt Version</label>
+        <input type="text" id="acc-ver" value="2026_01">
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:12px;">
+      <label for="acc-input">Accessions or Protein names</label>
+      <textarea id="acc-input" rows="4" placeholder="One per line, or space/comma separated&#10;P04637&#10;Q9Y6K9"></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="accessionLookup()">Get Sequences</button>
+    <div id="acc-results" class="hidden" style="margin-top:16px;">
+      <div id="acc-count" class="text-muted text-sm" style="margin-bottom:8px;"></div>
+      <div id="acc-table"></div>
+      <div style="margin-top:10px;">
+        <button class="btn btn-secondary btn-sm" id="acc-dl-fasta">Download FASTA</button>
+      </div>
+    </div>
+  </div>
+</details>
+
+<!-- Domain Coordinate Lookup -->
+<details class="expander">
+  <summary>Domain Coordinate Lookup</summary>
+  <div class="expander-body">
+    <div class="form-row" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label for="dom-ver">UniProt Version</label>
+        <input type="text" id="dom-ver" value="2026_01">
+      </div>
+      <div class="form-group">
+        <label for="dom-evalue">E-value cutoff (optional)</label>
+        <input type="number" id="dom-evalue" placeholder="e.g. 1e-5" step="any">
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:12px;">
+      <label for="dom-accs">Accessions or Protein names</label>
+      <textarea id="dom-accs" rows="3" placeholder="One per line or space/comma separated"></textarea>
+    </div>
+    <div class="flex gap-8" style="margin-bottom:12px;">
+      <button class="btn btn-primary" onclick="domainLookup(false)">Fetch Domains</button>
+      <button class="btn btn-secondary" onclick="domainLookup(true)">Fetch & Draw Architecture</button>
+    </div>
+    <div id="dom-results" class="hidden" style="margin-top:16px;">
+      <div id="dom-count" class="text-muted text-sm" style="margin-bottom:8px;"></div>
+      <div id="dom-table"></div>
+      <div id="dom-arch-img" class="hidden" style="margin-top:12px;"></div>
+      <div style="margin-top:10px;">
+        <button class="btn btn-secondary btn-sm" id="dom-dl-arch" class="hidden">Download Architecture PNG</button>
+        <button class="btn btn-secondary btn-sm" id="dom-dl-csv" onclick="">Download CSV</button>
+      </div>
+    </div>
+  </div>
+</details>
+
+<!-- GO → Domain Profiles -->
+<details class="expander">
+  <summary>GO Term → HMM Domain Profiles</summary>
+  <div class="expander-body">
+    <div class="form-row" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label for="go-ver">UniProt Version</label>
+        <input type="text" id="go-ver" value="2026_01">
+      </div>
+      <div class="form-group">
+        <label for="go-term">GO Term</label>
+        <input type="text" id="go-term" placeholder="e.g. GO:0005634">
+      </div>
+      <div class="form-group">
+        <label for="go-evalue">E-value cutoff (optional)</label>
+        <input type="number" id="go-evalue" placeholder="e.g. 1e-5" step="any">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="goDomains()">Find Domain Profiles</button>
+    <div id="go-results" class="hidden" style="margin-top:16px;">
+      <div id="go-count" class="text-muted text-sm" style="margin-bottom:8px;"></div>
+      <div id="go-table"></div>
+      <div style="margin-top:10px;">
+        <button class="btn btn-secondary btn-sm" id="go-dl-csv">Download CSV</button>
+      </div>
+    </div>
+  </div>
+</details>
+
+<!-- Extract Branch -->
+<details class="expander">
+  <summary>Extract Downloaded Branch</summary>
+  <div class="expander-body">
+    <p class="text-muted text-sm" style="margin-bottom:12px;">
+      In the ETE4 Interactive Viewer, right-click a clade root → <em>Download branch as newick</em>.
+      Upload that file here to extract accessions and fetch their sequences.
+    </p>
+    <div class="form-row" style="margin-bottom:12px;">
+      <div class="form-group">
+        <label for="branch-ver">UniProt Version</label>
+        <input type="text" id="branch-ver" value="2026_01">
+      </div>
+      <div class="form-group">
+        <label for="branch-file">Branch Newick file</label>
+        <input type="file" id="branch-file" class="file-input" accept=".nwk,.nw,.tree,.txt">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="extractBranch()">Extract Data</button>
+    <div id="branch-results" class="hidden" style="margin-top:16px;">
+      <div id="branch-count" class="text-muted text-sm" style="margin-bottom:8px;"></div>
+      <div style="margin-top:10px;" class="flex gap-8">
+        <button class="btn btn-secondary btn-sm" id="branch-dl-accs">Download Accessions (.txt)</button>
+        <button class="btn btn-secondary btn-sm" id="branch-dl-fasta">Download FASTA</button>
+      </div>
+    </div>
+  </div>
+</details>
+
+<!-- Database Info -->
+<details class="expander">
+  <summary>Database Info</summary>
+  <div class="expander-body">
+    <button class="btn btn-primary" onclick="dbInfo()">List Versions & Stats</button>
+    <div id="dbinfo-results" class="hidden" style="margin-top:16px;">
+      <div id="dbinfo-table"></div>
+    </div>
+  </div>
+</details>
+
+<script>
+async function post(url, body) {
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    return res.json();
+}
+
+function parseCsvText(rows, cols) {
+    const lines = [cols.join(',')];
+    rows.forEach(r => lines.push(cols.map(c => JSON.stringify(r[c] ?? '')).join(',')));
+    return lines.join('\n');
+}
+
+// Standard Retrieval
+async function fetchSequences() {
+    clearAlert('util-alert');
+    const ver = document.getElementById('sr-ver').value.trim();
+    const tax = parseTaxIds(document.getElementById('sr-tax').value);
+    const proteome = document.getElementById('sr-proteome').value.trim() || null;
+    const go_id = document.getElementById('sr-go').value.trim() || null;
+    const pfam_id = document.getElementById('sr-pfam').value.trim() || null;
+
+    const data = await post('/api/fetch-sequences', { version: ver, tax_ids: tax, proteome, go_id, pfam_id });
+    if (data.error) { showAlert('util-alert', 'error', data.error); return; }
+    if (!data.count) { showAlert('util-alert', 'info', 'No records found.'); return; }
+
+    document.getElementById('sr-count').textContent = `${data.count} sequences retrieved.`;
+    document.getElementById('sr-table').innerHTML = makeTable(data.records, Object.keys(data.records[0]));
+    showEl('sr-results');
+
+    document.getElementById('sr-dl-fasta').onclick = () => downloadText(`uniprot_${ver}.fasta`, data.fasta);
+}
+
+// HMM Search
+async function hmmSearch() {
+    clearAlert('util-alert');
+    const ver = document.getElementById('hmm-ver').value.trim();
+    const query = document.getElementById('hmm-query').value.trim();
+    if (!query) { showAlert('util-alert', 'error', 'Enter an HMM name or accession.'); return; }
+
+    const evalue = document.getElementById('hmm-evalue').value ? parseFloat(document.getElementById('hmm-evalue').value) : null;
+    const tax = parseTaxIds(document.getElementById('hmm-tax').value);
+
+    const data = await post('/api/hmm-search', { version: ver, hmm_query: query, evalue, tax_ids: tax });
+    if (data.error) { showAlert('util-alert', 'error', data.error); return; }
+    if (!data.count) { showAlert('util-alert', 'info', 'No records found.'); return; }
+
+    document.getElementById('hmm-count').textContent = `${data.count} HMM hits found.`;
+    document.getElementById('hmm-table').innerHTML = makeTable(data.records, Object.keys(data.records[0]));
+    showEl('hmm-results');
+    document.getElementById('hmm-dl-fasta').onclick = () => downloadText(`hmm_${query}.fasta`, data.fasta);
+}
+
+// Accession Lookup
+async function accessionLookup() {
+    clearAlert('util-alert');
+    const ver = document.getElementById('acc-ver').value.trim();
+    const raw = document.getElementById('acc-input').value;
+    const accs = raw.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
+    if (!accs.length) { showAlert('util-alert', 'error', 'Enter at least one accession.'); return; }
+
+    const data = await post('/api/accession-lookup', { version: ver, accessions: accs });
+    if (data.error) { showAlert('util-alert', 'error', data.error); return; }
+    if (!data.count) { showAlert('util-alert', 'info', 'No records found.'); return; }
+
+    document.getElementById('acc-count').textContent = `${data.count} sequences found.`;
+    const cols = Object.keys(data.records[0]).filter(c => c !== 'sequence');
+    document.getElementById('acc-table').innerHTML = makeTable(data.records, cols);
+    showEl('acc-results');
+    document.getElementById('acc-dl-fasta').onclick = () => downloadText('accessions.fasta', data.fasta);
+}
+
+// Domain Lookup
+let domData = null;
+async function domainLookup(draw) {
+    clearAlert('util-alert');
+    const ver = document.getElementById('dom-ver').value.trim();
+    const raw = document.getElementById('dom-accs').value;
+    const accs = raw.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
+    if (!accs.length) { showAlert('util-alert', 'error', 'Enter at least one accession.'); return; }
+    const evalue = document.getElementById('dom-evalue').value ? parseFloat(document.getElementById('dom-evalue').value) : null;
+
+    const data = await post('/api/domain-lookup', { version: ver, accessions: accs, evalue, draw });
+    domData = data;
+
+    if (data.error) { showAlert('util-alert', 'error', data.error); return; }
+    if (!data.count) { showAlert('util-alert', 'info', 'No domains found.'); return; }
+
+    document.getElementById('dom-count').textContent = `${data.count} domain records.`;
+    document.getElementById('dom-table').innerHTML = makeTable(data.domains, Object.keys(data.domains[0]));
+
+    if (data.png) {
+        showImage('dom-arch-img', data.png);
+        const dlBtn = document.getElementById('dom-dl-arch');
+        dlBtn.classList.remove('hidden');
+        dlBtn.onclick = () => {
+            const a = document.createElement('a');
+            a.href = `data:image/png;base64,${data.png}`;
+            a.download = 'domain_architecture.png';
+            a.click();
+        };
+    }
+
+    document.getElementById('dom-dl-csv').onclick = () => {
+        if (!domData || !domData.domains) return;
+        const cols = Object.keys(domData.domains[0]);
+        downloadText('domains.csv', parseCsvText(domData.domains, cols), 'text/csv');
+    };
+
+    showEl('dom-results');
+}
+
+// GO → Domains
+let goData = null;
+async function goDomains() {
+    clearAlert('util-alert');
+    const ver = document.getElementById('go-ver').value.trim();
+    const go = document.getElementById('go-term').value.trim();
+    if (!go) { showAlert('util-alert', 'error', 'Enter a GO term.'); return; }
+    const evalue = document.getElementById('go-evalue').value ? parseFloat(document.getElementById('go-evalue').value) : null;
+
+    const data = await post('/api/go-domains', { version: ver, go_term: go, evalue });
+    goData = data;
+
+    if (data.error) { showAlert('util-alert', 'error', data.error); return; }
+    if (!data.count) { showAlert('util-alert', 'info', 'No domain profiles found.'); return; }
+
+    document.getElementById('go-count').textContent = `${data.count} domain profiles found.`;
+    document.getElementById('go-table').innerHTML = makeTable(data.results, Object.keys(data.results[0]));
+    showEl('go-results');
+
+    document.getElementById('go-dl-csv').onclick = () => {
+        if (!goData || !goData.results) return;
+        const cols = Object.keys(goData.results[0]);
+        downloadText(`go_${go.replace(':','_')}_domains.csv`, parseCsvText(goData.results, cols), 'text/csv');
+    };
+}
+
+// Extract Branch
+async function extractBranch() {
+    clearAlert('util-alert');
+    const ver = document.getElementById('branch-ver').value.trim();
+    const file = document.getElementById('branch-file').files[0];
+    if (!file) { showAlert('util-alert', 'error', 'Upload a branch Newick file.'); return; }
+
+    const fd = new FormData();
+    fd.append('version', ver);
+    fd.append('branch_file', file);
+
+    const res = await fetch('/api/extract-branch', { method: 'POST', body: fd });
+    const data = await res.json();
+
+    if (data.error) { showAlert('util-alert', 'error', data.error); return; }
+
+    document.getElementById('branch-count').textContent =
+        `Extracted ${data.n_accessions} accessions. ${data.n_sequences} sequences found in the database.`;
+    showEl('branch-results');
+
+    document.getElementById('branch-dl-accs').onclick = () =>
+        downloadText('branch_accessions.txt', data.accessions.join('\n'));
+
+    document.getElementById('branch-dl-fasta').onclick = () =>
+        downloadText('branch_sequences.fasta', data.fasta || '');
+    document.getElementById('branch-dl-fasta').disabled = !data.fasta;
+}
+
+// DB Info
+async function dbInfo() {
+    clearAlert('util-alert');
+    const data = await fetch('/api/db-info').then(r => r.json());
+    if (data.error) { showAlert('util-alert', 'error', data.error); return; }
+    const versions = data.versions || [];
+    if (!versions.length) { showAlert('util-alert', 'info', 'No versions found.'); return; }
+    document.getElementById('dbinfo-table').innerHTML = makeTable(
+        versions.map(v => typeof v === 'object' ? v : { version: v }),
+    );
+    showEl('dbinfo-results');
+}
+</script>
+{% endblock %}

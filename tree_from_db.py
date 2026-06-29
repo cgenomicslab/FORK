@@ -23,6 +23,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 try:
     from ete4 import PhyloTree
+    from ete4.smartview import CircleFace
     from ete4.treeview import TreeStyle, SeqMotifFace, TextFace, NodeStyle
 
     # from ete4.smartview import Layout, TextFace, SeqFace, RectFace, BASIC_LAYOUT
@@ -535,6 +536,15 @@ if __name__ == "__main__":
                 t.set_outgroup(t.get_midpoint_outgroup())
                 t.resolve_polytomy(descendants=True)
 
+            # Annotate internal nodes with evoltype ("D"=duplication, "S"=speciation)
+            try:
+                t.get_descendant_evol_events()
+                print(
+                    "INFO--Ortholog/paralog annotation complete (evoltype set on internal nodes)"
+                )
+            except Exception as e:
+                print(f"WARNING--Could not annotate evol events: {e}")
+
             # Fetch Domain Data
             domain_dict = {}
             try:
@@ -879,6 +889,37 @@ if __name__ == "__main__":
                     name="Branch colors", active=True, draw_node=_draw_branch_color
                 )
 
+                # ORTHOLOGY / PARALOGY LAYOUT
+                def _draw_ortho_para(node):
+                    evol_type = node.props.get("evoltype", None)
+                    if evol_type == "D":
+                        return CircleFace(
+                            7,
+                            style={
+                                "fill": "rgba(255, 50, 50, 0.25)",
+                                "stroke": "rgba(255, 50, 50, 0.4)",
+                                "stroke-width": 1,
+                            },
+                            position="top",
+                            column=0,
+                        )
+                    elif evol_type == "S":
+                        return CircleFace(
+                            7,
+                            style={
+                                "fill": "rgba(50, 50, 255, 0.15)",
+                                "stroke": "rgba(50, 50, 255, 0.3)",
+                                "stroke-width": 1,
+                            },
+                            position="top",
+                            column=0,
+                        )
+                    return None
+
+                ortho_para_layout = Layout(
+                    name="ortho/para", active=False, draw_node=_draw_ortho_para
+                )
+
                 interactive_colormap = dict(colormap) if colormap else {}
                 if color_by == "taxon" and not interactive_colormap:
                     distinct_palette = [
@@ -967,6 +1008,7 @@ if __name__ == "__main__":
                         domain_layout,
                         seq_layout,
                         branch_color_layout,
+                        ortho_para_layout,
                     ],
                     keep_server=True,
                     quiet=True,
@@ -984,6 +1026,7 @@ if __name__ == "__main__":
                         "rank",
                         "dist",
                         "support",
+                        "evoltype",
                     ],
                 )
 

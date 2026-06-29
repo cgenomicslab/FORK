@@ -1,0 +1,1002 @@
+{% extends "base.html" %}
+
+{% block title %}High-Resolution Profile — UniProt Lab Manager{% endblock %}
+
+{% block page_header %}
+<h1>High-Resolution Phylogenetic Profile</h1>
+<p>Build per-Pfam gene trees, partition them into subclades, then assemble a fine-grained presence/absence matrix.</p>
+{% endblock %}
+
+{% block content %}
+
+<!-- Step indicators -->
+<div class="steps" id="step-bar">
+  <div class="step active" id="step1"><div class="step-num">1</div> Filters & Build Trees</div>
+  <div class="step-line"></div>
+  <div class="step" id="step2"><div class="step-num">2</div> Partition Trees</div>
+  <div class="step-line"></div>
+  <div class="step" id="step3"><div class="step-num">3</div> Assemble Profile</div>
+</div>
+
+<!-- Step 1: Input form -->
+<div id="step1-section">
+  <div class="analysis-layout">
+
+    <div class="panel-left">
+
+      <div class="form-section">
+        <div class="form-section-header">Protein Filters</div>
+        <div class="form-section-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ver">UniProt Version</label>
+              <input type="text" id="ver" value="2026_01">
+            </div>
+            <div class="form-group">
+              <label for="evalue">E-value cutoff (optional)</label>
+              <input type="number" id="evalue" placeholder="e.g. 1e-5" step="any">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="pfam-text">Pfam IDs / HMM names</label>
+            <textarea id="pfam-text" rows="3" placeholder="PF00041, PF00069&#10;PF00100"></textarea>
+            <span class="hint">Comma or newline separated. One tree is built per entry.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-header">Taxonomy</div>
+        <div class="form-section-body">
+          <div class="form-group">
+            <label for="taxids">Taxonomy IDs (optional)</label>
+            <input type="text" id="taxids" placeholder="comma separated">
+            <input type="file" id="tax-file" class="file-input" accept=".txt">
+          </div>
+          <div class="form-group">
+            <label for="excl-taxids">Exclude taxonomy IDs (optional)</label>
+            <input type="text" id="excl-taxids" placeholder="comma separated">
+            <input type="file" id="excl-file" class="file-input" accept=".txt">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-header">Tree Build Parameters</div>
+        <div class="form-section-body">
+          <div class="form-group">
+            <label for="output-root">Output / cache directory</label>
+            <input type="text" id="output-root" value="/home/user/highres_runs">
+            <span class="hint">Per-config subdirectories are created here. Repeated runs with identical parameters reuse cached trees.</span>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="aln">Aligner</label>
+              <select id="aln">
+                <option value="mafft">mafft</option>
+                <option value="einsi">einsi</option>
+                <option value="clustalo">clustalo</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="ml">Tree method</label>
+              <select id="ml">
+                <option value="fasttree">FastTree</option>
+                <option value="iqtree">IQ-TREE</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="gt">trimAl -gt</label>
+              <input type="text" id="gt" value="0.01">
+            </div>
+            <div class="form-group">
+              <label for="cpu">CPU threads</label>
+              <input type="number" id="cpu" value="8" min="1">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary btn-run" id="build-btn" onclick="buildTrees()">Build Trees</button>
+    </div>
+
+    <!-- Right: status -->
+    <div class="panel-right">
+      <div id="build-alert" class="hidden"></div>
+      <div id="build-status" class="status-panel hidden">
+        <div class="status-header">
+          <div id="build-dot" class="status-dot running"></div>
+          <span id="build-status-text">Building trees…</span>
+        </div>
+        <pre id="build-log" class="status-log"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Step 2: Partitioning (appears after trees built) -->
+<div id="step2-section" class="hidden">
+  <hr class="divider">
+
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-header">
+      <h2>Tree-Build Summary</h2>
+      <button class="btn btn-secondary btn-sm" onclick="resetAll()">Reset</button>
+    </div>
+    <div class="card-body">
+      <div id="summary-table"></div>
+    </div>
+  </div>
+
+  <!-- 2b. Species (NCBI) Tree — static PNG, reconstructed from Streamlit section -->
+  <div class="card" style="margin-bottom:20px;">
+    <div class="card-header">
+      <h2>Species Tree (NCBI taxonomy)</h2>
+      <span class="badge badge-gray">Static PNG</span>
+    </div>
+    <div class="card-body">
+      <p class="text-muted text-sm" style="margin-bottom:14px;">
+        Reference NCBI taxonomy tree built from the taxa found in the gene trees above.
+        Useful to compare species topology against the gene trees.
+      </p>
+      <div class="form-row" style="max-width:420px;margin-bottom:14px;">
+        <div class="form-group">
+          <label>Branch colormap (optional)</label>
+          <input type="file" id="sp-colormap" class="file-input" accept=".txt,.tsv">
+          <span class="hint">taxid ↦ hex color, tab-separated, one per line</span>
+        </div>
+      </div>
+      <button class="btn btn-secondary" id="sp-tree-btn" onclick="renderSpeciesTree()">Render Species Tree</button>
+      <div id="sp-tree-alert" class="hidden" style="margin-top:10px;"></div>
+      <div id="sp-tree-result" class="hidden" style="margin-top:14px;">
+        <div id="sp-tree-img" class="result-img-wrap"></div>
+        <div class="download-bar">
+          <span class="label">Download:</span>
+          <button class="btn btn-secondary btn-sm" id="sp-tree-dl">Species Tree PNG</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pfam-blocks"></div>
+
+  <div style="margin-top:20px;">
+    <button class="btn btn-primary" id="compute-profile-btn" onclick="showStep3()" disabled>
+      Compute Profile →
+    </button>
+    <span class="text-muted text-sm" id="partition-status" style="margin-left:12px;"></span>
+  </div>
+</div>
+
+<!-- Step 3: Profile assembly -->
+<div id="step3-section" class="hidden">
+  <hr class="divider">
+
+  <div class="card">
+    <div class="card-header">
+      <h2>Profile Assembly</h2>
+    </div>
+    <div class="card-body">
+      <div class="form-row three" style="margin-bottom:16px;">
+        <div class="form-group">
+          <label class="checkbox-item">
+            <input type="checkbox" id="opt-binary"> Binary (0/1)
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-item">
+            <input type="checkbox" id="opt-log"> Log-scale colors
+          </label>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-item">
+            <input type="checkbox" id="opt-cluster"> Cluster columns
+          </label>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="compute-btn" onclick="computeProfile()">Compute Profile</button>
+    </div>
+
+    <div id="profile-alert" class="hidden" style="padding:0 20px;"></div>
+
+    <div id="profile-results" class="hidden">
+      <hr class="divider" style="margin:0;">
+      <div class="card-body">
+        <h3 style="font-size:13px;font-weight:600;margin-bottom:12px;">Heatmap</h3>
+        <div id="heatmap-img"></div>
+        <h3 style="font-size:13px;font-weight:600;margin:16px 0 10px;">Matrix</h3>
+        <div id="matrix-table"></div>
+        <div id="missing-warning" class="hidden" style="margin-top:10px;"></div>
+
+        <!-- ETE4 interactive view of this profile on the NCBI tree -->
+        <hr class="divider">
+        <h3 style="font-size:13px;font-weight:600;margin-bottom:8px;">View Profile on NCBI Tree (ETE4)</h3>
+        <p class="text-muted text-sm" style="margin-bottom:10px;">
+          Visualize the subclade profile alongside the NCBI taxonomy tree in an interactive ETE4 session —
+          each column of the matrix becomes a colour-coded aligned column on the species tree.
+        </p>
+        <div class="form-row" style="max-width:420px;margin-bottom:10px;">
+          <div class="form-group">
+            <label>Branch colormap (optional)</label>
+            <input type="file" id="ete-matrix-colormap" class="file-input" accept=".txt">
+          </div>
+          <div class="form-group">
+            <label for="ete-matrix-port">ETE port</label>
+            <input type="number" id="ete-matrix-port" value="5003" min="1024" max="65535">
+          </div>
+        </div>
+        <button class="btn btn-secondary" id="ete-matrix-btn" onclick="launchEteMatrixViz()">
+          Open in ETE4
+        </button>
+        <div id="ete-matrix-alert" class="hidden" style="margin-top:8px;"></div>
+        <div id="ete-matrix-viewer" class="hidden" style="margin-top:12px;"></div>
+      </div>
+      <div class="download-bar">
+        <span class="label">Download:</span>
+        <button class="btn btn-secondary btn-sm" id="dl-matrix-btn">Matrix CSV</button>
+        <button class="btn btn-secondary btn-sm" id="dl-heatmap-btn">Heatmap PNG</button>
+        <button class="btn btn-secondary btn-sm" id="dl-fasta-btn">Sequences FASTA</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let hrState = {
+    jobId:     null,
+    summary:   null,
+    partitions: {},   // {pfam: {label: [leaf_names]}}
+    matrixCsv: null,  // stored after computeProfile() for ETE matrix viz
+};
+
+// Tree viewer iframes: {pfam: iframe_element}
+let pfamIframes = {};
+
+function setStep(n) {
+    [1,2,3].forEach(i => {
+        const s = document.getElementById(`step${i}`);
+        if (i < n) s.className = 'step done';
+        else if (i === n) s.className = 'step active';
+        else s.className = 'step';
+    });
+}
+
+async function buildTrees() {
+    const pfamText = document.getElementById('pfam-text').value.trim();
+    if (!pfamText) {
+        showAlert('build-alert', 'error', 'Enter at least one Pfam ID.');
+        return;
+    }
+
+    hrState.partitions = {};
+    hrState.jobId = null;
+    hideEl('step2-section');
+    hideEl('step3-section');
+    clearAlert('build-alert');
+    setStep(1);
+
+    const fd = new FormData();
+    fd.append('pfams', pfamText);
+    fd.append('version', document.getElementById('ver').value.trim());
+    fd.append('output_root', document.getElementById('output-root').value.trim());
+    fd.append('aln', document.getElementById('aln').value);
+    fd.append('ml', document.getElementById('ml').value);
+    fd.append('gt', document.getElementById('gt').value);
+    fd.append('cpu', document.getElementById('cpu').value);
+
+    const evalue = document.getElementById('evalue').value.trim();
+    if (evalue) fd.append('evalue', evalue);
+
+    const taxFile = document.getElementById('tax-file').files[0];
+    if (taxFile) fd.append('tax_file', taxFile);
+    else fd.append('taxids', document.getElementById('taxids').value.trim());
+
+    const exclFile = document.getElementById('excl-file').files[0];
+    if (exclFile) fd.append('excl_file', exclFile);
+    else fd.append('exclude_taxids', document.getElementById('excl-taxids').value.trim());
+
+    document.getElementById('build-btn').disabled = true;
+    showEl('build-status');
+    document.getElementById('build-dot').className = 'status-dot running';
+    document.getElementById('build-status-text').textContent = 'Building trees…';
+    document.getElementById('build-log').textContent = '';
+
+    try {
+        const res = await fetch('/api/highres/build-trees', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.error) {
+            showJobError(data.error);
+            return;
+        }
+        hrState.jobId = data.job_id;
+        pollBuildStatus();
+    } catch (e) {
+        showJobError(e.message);
+    }
+}
+
+let pollTimer = null;
+function pollBuildStatus() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+        if (!hrState.jobId) return;
+        try {
+            const res = await fetch(`/api/highres/job/${hrState.jobId}`);
+            const data = await res.json();
+
+            if (data.log && data.log.length) {
+                document.getElementById('build-log').textContent = data.log.join('\n');
+            }
+
+            if (data.status === 'done') {
+                clearInterval(pollTimer);
+                document.getElementById('build-btn').disabled = false;
+                document.getElementById('build-dot').className = 'status-dot done';
+                document.getElementById('build-status-text').textContent = 'Done.';
+                hrState.summary = data.summary;
+                showStep2(data.summary);
+            } else if (data.status === 'error') {
+                clearInterval(pollTimer);
+                showJobError(data.error);
+            }
+        } catch (e) {
+            clearInterval(pollTimer);
+            showJobError(e.message);
+        }
+    }, 3000);
+}
+
+function showJobError(msg) {
+    document.getElementById('build-btn').disabled = false;
+    document.getElementById('build-dot').className = 'status-dot error';
+    document.getElementById('build-status-text').textContent = 'Error';
+    showAlert('build-alert', 'error', msg);
+}
+
+function showStep2(summary) {
+    setStep(2);
+
+    // Summary table
+    const rows = Object.entries(summary).map(([pfam, r]) => ({
+        Pfam: pfam,
+        Status: r.error ? `ERROR: ${r.error.slice(0,60)}` : 'OK',
+        Cached: r.cached ? 'yes' : 'no',
+        Leaves: r.n_leaves,
+        'Max depth': r.max_depth.toFixed(4),
+    }));
+    document.getElementById('summary-table').innerHTML = makeTable(rows, ['Pfam','Status','Cached','Leaves','Max depth']);
+
+    // Per-Pfam partition blocks
+    const container = document.getElementById('pfam-blocks');
+    container.innerHTML = '';
+    pfamIframes = {};
+
+    Object.entries(summary).forEach(([pfam, r]) => {
+        if (r.error) return;
+        container.appendChild(makePfamBlock(pfam, r));
+    });
+
+    showEl('step2-section');
+    updatePartitionStatus();
+}
+
+function makePfamBlock(pfam, r) {
+    const div = document.createElement('div');
+    div.className = 'pfam-block';
+    div.style.marginBottom = '16px';
+    div.id = `pfam-block-${pfam}`;
+
+    const locked = hrState.partitions[pfam];
+
+    div.innerHTML = `
+      <div class="pfam-block-header">
+        <span>${pfam}</span>
+        <span class="badge ${locked ? 'badge-green' : 'badge-gray'}" id="lock-badge-${pfam}">
+          ${locked ? `Locked (${Object.keys(locked).length} subclades)` : 'Not locked'}
+        </span>
+        <span class="text-muted text-sm" style="margin-left:auto;">${r.n_leaves} leaves · max depth ${r.max_depth.toFixed(4)}</span>
+      </div>
+      <div class="pfam-block-body">
+
+        <!-- Mode selector -->
+        <div class="form-group" style="margin-bottom:12px;">
+          <label>Partition mode</label>
+          <div class="radio-group">
+            <label class="radio-item"><input type="radio" name="mode-${pfam}" value="depth" checked onchange="onModeChange('${pfam}')"> Depth slider</label>
+            <label class="radio-item"><input type="radio" name="mode-${pfam}" value="mrca" onchange="onModeChange('${pfam}')"> Manual MRCA</label>
+            <label class="radio-item"><input type="radio" name="mode-${pfam}" value="node_path" onchange="onModeChange('${pfam}')"> Node path</label>
+          </div>
+        </div>
+
+        <!-- Depth slider -->
+        <div id="depth-ctrl-${pfam}">
+          <div class="form-group">
+            <label>Cut depth (0 – ${r.max_depth.toFixed(4)})</label>
+            <input type="range" id="depth-slider-${pfam}"
+              min="0" max="${r.max_depth * 1.01}"
+              step="${r.max_depth / 200}"
+              value="${(r.max_depth * 0.5).toFixed(4)}"
+              oninput="document.getElementById('depth-val-${pfam}').textContent = parseFloat(this.value).toFixed(4)">
+            <div class="slider-val" id="depth-val-${pfam}">${(r.max_depth * 0.5).toFixed(4)}</div>
+          </div>
+        </div>
+
+        <!-- MRCA controls -->
+        <div id="mrca-ctrl-${pfam}" class="hidden">
+          <div class="form-group">
+            <label>Leaf-name groups (one group per line, comma-separated)</label>
+            <textarea id="mrca-text-${pfam}" rows="4" placeholder="# Each line defines one subclade&#10;${r.leaves.slice(0,2).join(', ')}"></textarea>
+          </div>
+          <label class="checkbox-item" style="margin-top:4px;">
+            <input type="checkbox" id="unassigned-${pfam}" checked>
+            Include 'unassigned' bucket
+          </label>
+        </div>
+
+        <!-- Node path controls -->
+        <div id="nodepath-ctrl-${pfam}" class="hidden">
+          <div style="margin-bottom:8px;">
+            <button class="btn btn-secondary btn-sm" onclick="loadNodeList('${pfam}')">Show node list</button>
+          </div>
+          <div id="nodelist-${pfam}" class="hidden" style="margin-bottom:10px;max-height:180px;overflow-y:auto;"></div>
+          <div class="form-group">
+            <label>Node paths (one per line, comma-separated indices)</label>
+            <textarea id="nodepath-text-${pfam}" rows="4" placeholder="# e.g.&#10;0,1&#10;1,0"></textarea>
+          </div>
+        </div>
+
+        <!-- Partition preview -->
+        <div id="partition-preview-${pfam}" class="hidden partition-preview"></div>
+
+        <!-- Action buttons -->
+        <div class="flex gap-8" style="margin-top:12px;">
+          <button class="btn btn-secondary btn-sm" onclick="previewPartition('${pfam}')">Preview</button>
+          <button class="btn btn-primary btn-sm" id="lock-btn-${pfam}" onclick="lockPartition('${pfam}')">Use this partition</button>
+        </div>
+
+        <!-- Tree preview expander -->
+        <details style="margin-top:14px;" class="expander" style="border:none;background:transparent;">
+          <summary style="padding:8px 0;font-size:12px;">Show tree preview</summary>
+          <div class="expander-body" style="padding:10px 0 0;">
+            <div class="radio-group" style="margin-bottom:10px;">
+              <label class="radio-item"><input type="radio" name="tree-view-${pfam}" value="d3" checked> D3 interactive</label>
+              <label class="radio-item"><input type="radio" name="tree-view-${pfam}" value="ete4"> ETE4 server</label>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadTreePreview('${pfam}')">Load tree</button>
+            <div id="tree-preview-${pfam}" style="margin-top:10px;"></div>
+          </div>
+        </details>
+
+      </div>
+    `;
+
+    return div;
+}
+
+function onModeChange(pfam) {
+    const mode = document.querySelector(`input[name="mode-${pfam}"]:checked`).value;
+    document.getElementById(`depth-ctrl-${pfam}`).classList.toggle('hidden', mode !== 'depth');
+    document.getElementById(`mrca-ctrl-${pfam}`).classList.toggle('hidden', mode !== 'mrca');
+    document.getElementById(`nodepath-ctrl-${pfam}`).classList.toggle('hidden', mode !== 'node_path');
+}
+
+async function previewPartition(pfam) {
+    const payload = buildPartitionPayload(pfam);
+    if (!payload) return;
+
+    try {
+        const res = await fetch('/api/highres/partition', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: hrState.jobId, pfam, ...payload }),
+        });
+        const data = await res.json();
+        const preview = document.getElementById(`partition-preview-${pfam}`);
+        if (data.error) {
+            preview.innerHTML = `<span class="text-muted">${data.error}</span>`;
+        } else {
+            const rows = data.summary.map(s => ({
+                Subclade: s.label,
+                'Leaves': s.n_leaves,
+                'Sample': s.sample.join(', ') + (s.n_leaves > 3 ? ' …' : ''),
+            }));
+            preview.innerHTML = `<div class="label">Preview (${data.summary.length} subclades)</div>` + makeTable(rows, ['Subclade','Leaves','Sample']);
+            preview.dataset.parts = JSON.stringify(data.parts);
+        }
+        showEl(`partition-preview-${pfam}`);
+    } catch (e) {
+        showAlert('build-alert', 'error', e.message);
+    }
+}
+
+async function lockPartition(pfam) {
+    const preview = document.getElementById(`partition-preview-${pfam}`);
+    if (!preview.dataset.parts) {
+        // Auto-preview first
+        await previewPartition(pfam);
+        const p2 = document.getElementById(`partition-preview-${pfam}`);
+        if (!p2.dataset.parts) return;
+        hrState.partitions[pfam] = JSON.parse(p2.dataset.parts);
+    } else {
+        hrState.partitions[pfam] = JSON.parse(preview.dataset.parts);
+    }
+
+    const badge = document.getElementById(`lock-badge-${pfam}`);
+    const n = Object.keys(hrState.partitions[pfam]).length;
+    badge.textContent = `Locked (${n} subclades)`;
+    badge.className = 'badge badge-green';
+    updatePartitionStatus();
+}
+
+function buildPartitionPayload(pfam) {
+    const mode = document.querySelector(`input[name="mode-${pfam}"]:checked`).value;
+    if (mode === 'depth') {
+        const threshold = parseFloat(document.getElementById(`depth-slider-${pfam}`).value);
+        if (threshold <= 0) { alert('Threshold must be > 0'); return null; }
+        return { mode: 'depth', threshold };
+    }
+    if (mode === 'mrca') {
+        const text = document.getElementById(`mrca-text-${pfam}`).value;
+        const groups = [];
+        text.split('\n').forEach(line => {
+            line = line.trim();
+            if (!line || line.startsWith('#')) return;
+            const members = line.split(',').map(s => s.trim()).filter(Boolean);
+            if (members.length) groups.push(members);
+        });
+        if (!groups.length) { alert('Enter at least one group of leaf names.'); return null; }
+        const include_unassigned = document.getElementById(`unassigned-${pfam}`).checked;
+        return { mode: 'mrca', groups, include_unassigned };
+    }
+    if (mode === 'node_path') {
+        const text = document.getElementById(`nodepath-text-${pfam}`).value;
+        const paths = [];
+        text.split('\n').forEach(line => {
+            line = line.trim();
+            if (!line || line.startsWith('#')) return;
+            const parts = line.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+            if (parts.length) paths.push(parts);
+        });
+        if (!paths.length) { alert('Enter at least one node path.'); return null; }
+        return { mode: 'node_path', paths };
+    }
+    return null;
+}
+
+async function loadNodeList(pfam) {
+    const container = document.getElementById(`nodelist-${pfam}`);
+    if (!container.classList.contains('hidden')) {
+        container.classList.add('hidden');
+        return;
+    }
+    try {
+        const res = await fetch('/api/highres/list-nodes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: hrState.jobId, pfam }),
+        });
+        const data = await res.json();
+        if (data.nodes && data.nodes.length) {
+            container.innerHTML = makeTable(data.nodes, ['path','n_leaves','sample']);
+        } else {
+            container.innerHTML = '<p class="text-muted">No internal nodes found.</p>';
+        }
+        container.classList.remove('hidden');
+    } catch (e) {
+        showAlert('build-alert', 'error', e.message);
+    }
+}
+
+async function loadTreePreview(pfam) {
+    const mode = document.querySelector(`input[name="tree-view-${pfam}"]:checked`).value;
+    const container = document.getElementById(`tree-preview-${pfam}`);
+
+    if (mode === 'd3') {
+        container.innerHTML = '<div class="tree-iframe-wrap" style="height:600px;"><iframe style="width:100%;height:600px;border:none;" id="tree-iframe-' + pfam + '" src="about:blank"></iframe></div>';
+
+        try {
+            const res = await fetch('/api/highres/tree-html', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_id: hrState.jobId, pfam }),
+            });
+            const html = await res.text();
+            const iframe = document.getElementById(`tree-iframe-${pfam}`);
+            iframe.srcdoc = html;
+        } catch (e) {
+            container.innerHTML = `<span class="text-muted">${e.message}</span>`;
+        }
+    } else {
+        // ETE4 server - ask user for port
+        const port = prompt('ETE4 port:', '5001');
+        if (!port) return;
+        container.innerHTML = `<p class="text-muted text-sm">Launching ETE4 on port ${port}…</p>`;
+        try {
+            const res = await fetch('/api/highres/launch-ete4', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_id: hrState.jobId, pfam, port: parseInt(port) }),
+            });
+            const data = await res.json();
+            if (data.error) {
+                container.innerHTML = `<span class="text-muted">${data.error}</span>`;
+            } else {
+                container.innerHTML = `
+                  <div class="tree-iframe-wrap" style="height:700px;">
+                    <iframe style="width:100%;height:700px;border:none;" src="http://localhost:${data.port}/static/gui.html?tree=tree-1"></iframe>
+                  </div>
+                  <button class="btn btn-danger btn-sm" style="margin-top:8px;" onclick="stopEte4('${data.ete_key}', '${pfam}')">Stop ETE4</button>
+                `;
+            }
+        } catch (e) {
+            container.innerHTML = `<span class="text-muted">${e.message}</span>`;
+        }
+    }
+}
+
+async function stopEte4(eteKey, pfam) {
+    await fetch('/api/highres/stop-ete4', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ete_key: eteKey }),
+    });
+    document.getElementById(`tree-preview-${pfam}`).innerHTML = '<p class="text-muted text-sm">ETE4 stopped.</p>';
+}
+
+function updatePartitionStatus() {
+    const summary = hrState.summary || {};
+    const successful = Object.entries(summary).filter(([, r]) => !r.error);
+    const locked = successful.filter(([pfam]) => hrState.partitions[pfam]);
+    const btn = document.getElementById('compute-profile-btn');
+    const label = document.getElementById('partition-status');
+
+    label.textContent = `${locked.length} / ${successful.length} Pfam(s) locked`;
+
+    if (locked.length > 0) {
+        btn.disabled = false;
+    }
+}
+
+function showStep3() {
+    setStep(3);
+    showEl('step3-section');
+    document.getElementById('step3-section').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function computeProfile() {
+    const locked = Object.entries(hrState.partitions);
+    if (!locked.length) {
+        showAlert('profile-alert', 'error', 'Lock at least one Pfam partition first.');
+        return;
+    }
+
+    clearAlert('profile-alert');
+    hideEl('profile-results');
+    document.getElementById('compute-btn').disabled = true;
+    document.getElementById('compute-btn').textContent = 'Computing…';
+
+    try {
+        const res = await fetch('/api/highres/compute-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                job_id: hrState.jobId,
+                partitions: hrState.partitions,
+                binary: document.getElementById('opt-binary').checked,
+                log_scale: document.getElementById('opt-log').checked,
+                cluster_cols: document.getElementById('opt-cluster').checked,
+            }),
+        });
+        const data = await res.json();
+
+        document.getElementById('compute-btn').disabled = false;
+        document.getElementById('compute-btn').textContent = 'Compute Profile';
+
+        if (data.error) {
+            showAlert('profile-alert', 'error', data.error);
+            return;
+        }
+
+        if (data.heatmap) showImage('heatmap-img', data.heatmap);
+        if (data.matrix) {
+            const cols = data.matrix.length ? Object.keys(data.matrix[0]) : [];
+            document.getElementById('matrix-table').innerHTML = makeTable(data.matrix, cols);
+        }
+
+        if (data.n_missing > 0) {
+            showAlert('missing-warning', 'warning', `${data.n_missing} accession(s) from the input trees were not found in the database for this version.`);
+        }
+
+        document.getElementById('dl-matrix-btn').onclick = () => {
+            downloadText('highres_profile.csv', data.matrix_csv, 'text/csv');
+        };
+        document.getElementById('dl-heatmap-btn').onclick = () => {
+            const img = document.querySelector('#heatmap-img img');
+            if (img) {
+                const a = document.createElement('a');
+                a.href = img.src;
+                a.download = 'highres_profile.png';
+                a.click();
+            }
+        };
+
+        hrState.matrixCsv = data.matrix_csv;
+
+        document.getElementById('dl-fasta-btn').onclick = async () => {
+            const btn = document.getElementById('dl-fasta-btn');
+            btn.disabled = true;
+            btn.textContent = 'Downloading…';
+            try {
+                const res = await fetch('/api/highres/download-fasta', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_id: hrState.jobId, partitions: hrState.partitions }),
+                });
+                if (res.ok) {
+                    downloadText('highres_subclades.fasta', await res.text(), 'text/plain');
+                } else {
+                    const err = await res.json();
+                    showAlert('profile-alert', 'error', 'FASTA error: ' + (err.error || 'Unknown'));
+                }
+            } catch (e) {
+                showAlert('profile-alert', 'error', 'FASTA error: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Sequences FASTA';
+            }
+        };
+
+        showEl('profile-results');
+        document.getElementById('profile-results').scrollIntoView({ behavior: 'smooth' });
+
+    } catch (e) {
+        document.getElementById('compute-btn').disabled = false;
+        document.getElementById('compute-btn').textContent = 'Compute Profile';
+        showAlert('profile-alert', 'error', e.message);
+    }
+}
+
+function resetAll() {
+    if (!confirm('Reset all trees and partitions?')) return;
+    hrState = { jobId: null, summary: null, partitions: {} };
+    hideEl('step2-section');
+    hideEl('step3-section');
+    setStep(1);
+    document.getElementById('build-btn').disabled = false;
+    document.getElementById('build-dot').className = 'status-dot running';
+    document.getElementById('build-status').classList.add('hidden');
+}
+
+// ---- Species (NCBI) static tree ----
+
+async function renderSpeciesTree() {
+    clearAlert('sp-tree-alert');
+    hideEl('sp-tree-result');
+
+    const btn = document.getElementById('sp-tree-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Building NCBI tree…';
+
+    const fd = new FormData();
+    if (hrState.jobId) fd.append('job_id', hrState.jobId);
+    const cmapFile = document.getElementById('sp-colormap').files[0];
+    if (cmapFile) fd.append('colormap', cmapFile);
+
+    try {
+        const res  = await fetch('/api/highres/species-tree', { method: 'POST', body: fd });
+        const data = await res.json();
+
+        btn.disabled    = false;
+        btn.textContent = 'Render Species Tree';
+
+        if (data.error) {
+            showAlert('sp-tree-alert', 'error', data.error);
+            return;
+        }
+
+        document.getElementById('sp-tree-img').innerHTML =
+            `<img src="data:image/png;base64,${data.png}" style="width:100%;display:block;">`;
+        document.getElementById('sp-tree-dl').onclick = () => {
+            const a = document.createElement('a');
+            a.href     = `data:image/png;base64,${data.png}`;
+            a.download = 'species_tree.png';
+            a.click();
+        };
+        showEl('sp-tree-result');
+
+    } catch (e) {
+        btn.disabled    = false;
+        btn.textContent = 'Render Species Tree';
+        showAlert('sp-tree-alert', 'error', e.message);
+    }
+}
+
+// ---- ETE4 interactive profile on NCBI tree ----
+
+async function launchEteMatrixViz() {
+    if (!hrState.matrixCsv) {
+        showAlert('ete-matrix-alert', 'error', 'Compute the profile first (Step 3), then click this button.');
+        return;
+    }
+
+    clearAlert('ete-matrix-alert');
+    hideEl('ete-matrix-viewer');
+
+    const port = document.getElementById('ete-matrix-port').value || '5003';
+    const btn  = document.getElementById('ete-matrix-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Launching ETE4…';
+
+    const fd = new FormData();
+    fd.append('matrix_csv', hrState.matrixCsv);
+    fd.append('port', port);
+    const cmapFile = document.getElementById('ete-matrix-colormap').files[0];
+    if (cmapFile) fd.append('colormap', cmapFile);
+
+    try {
+        const res  = await fetch('/api/highres/ete-matrix-viz', { method: 'POST', body: fd });
+        const data = await res.json();
+
+        btn.disabled    = false;
+        btn.textContent = 'Open in ETE4';
+
+        if (data.error) {
+            showAlert('ete-matrix-alert', 'error', data.error);
+            return;
+        }
+
+        document.getElementById('ete-matrix-viewer').innerHTML = `
+          <div class="status-panel" style="margin-bottom:12px;">
+            <div class="status-header">
+              <div class="status-dot done"></div>
+              <span>ETE profile viewer running on port ${data.port} (PID ${data.pid})</span>
+            </div>
+          </div>
+          <div class="tree-iframe-wrap" style="height:720px;">
+            <iframe style="width:100%;height:720px;border:none;"
+              src="http://localhost:${data.port}/static/gui.html?tree=tree-1"></iframe>
+          </div>`;
+        showEl('ete-matrix-viewer');
+        document.getElementById('ete-matrix-viewer').scrollIntoView({ behavior: 'smooth' });
+
+    } catch (e) {
+        btn.disabled    = false;
+        btn.textContent = 'Open in ETE4';
+        showAlert('ete-matrix-alert', 'error', e.message);
+    }
+}
+
+async function launchEteProfile() {
+    const tblout   = document.getElementById('ete-tblout').files[0];
+    const colormap = document.getElementById('ete-colormap').files[0];
+    const taxids   = document.getElementById('ete-taxids').files[0];
+
+    if (!tblout || !colormap || !taxids) {
+        showAlert('ete-alert', 'error', 'Please upload all three required files (tblout, colormap, taxids).');
+        return;
+    }
+
+    clearAlert('ete-alert');
+    hideEl('ete-viewer');
+
+    const port   = document.getElementById('ete-port').value  || '5002';
+    const maxVal = document.getElementById('ete-max').value   || '';
+
+    const btn = document.getElementById('ete-launch-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Launching… (building NCBI tree)';
+
+    const fd = new FormData();
+    fd.append('tblout',   tblout);
+    fd.append('colormap', colormap);
+    fd.append('taxids',   taxids);
+    fd.append('port',     port);
+    if (maxVal) fd.append('max', maxVal);
+
+    try {
+        const res  = await fetch('/api/ete-profile/launch', { method: 'POST', body: fd });
+        const data = await res.json();
+
+        btn.disabled    = false;
+        btn.textContent = 'Launch ETE Profile';
+
+        if (data.error) {
+            showAlert('ete-alert', 'error', data.error);
+            return;
+        }
+
+        showEl('ete-viewer');
+        document.getElementById('ete-viewer').innerHTML = `
+          <div class="status-panel" style="margin-bottom:12px;">
+            <div class="status-header">
+              <div class="status-dot done"></div>
+              <span>ETE profile running on port ${data.port} &mdash; PID ${data.pid}</span>
+            </div>
+          </div>
+          <div class="tree-iframe-wrap" style="height:720px;">
+            <iframe style="width:100%;height:720px;border:none;"
+              src="http://localhost:${data.port}/static/gui.html?tree=tree-1"></iframe>
+          </div>
+        `;
+        document.getElementById('ete-viewer').scrollIntoView({ behavior: 'smooth' });
+
+    } catch (e) {
+        btn.disabled    = false;
+        btn.textContent = 'Launch ETE Profile';
+        showAlert('ete-alert', 'error', e.message);
+    }
+}
+</script>
+
+<!-- ================================================================
+     ETE SPECIES TREE PROFILE
+     ================================================================ -->
+<hr class="divider" style="margin-top:32px;">
+
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <h2>ETE Species Tree Profile</h2>
+    <span class="badge badge-gray">Standalone — uses NCBI taxonomy</span>
+  </div>
+  <div class="card-body">
+    <p class="text-muted" style="margin-bottom:18px;font-size:13px;">
+      Visualize HMM domain counts directly on the NCBI taxonomy tree using ETE4.
+      Upload your <code>hmmsearch --tblout</code> output, a branch-colour map, and a taxids list.
+    </p>
+
+    <div class="analysis-layout">
+
+      <div class="panel-left">
+        <div class="form-section">
+          <div class="form-section-header">Input Files</div>
+          <div class="form-section-body">
+            <div class="form-group">
+              <label>HMMsearch tblout <span style="color:var(--error)">*</span></label>
+              <input type="file" id="ete-tblout" class="file-input" accept=".txt,.tblout,.out">
+            </div>
+            <div class="form-group">
+              <label>Colormap file <span style="color:var(--error)">*</span></label>
+              <input type="file" id="ete-colormap" class="file-input" accept=".txt">
+              <span class="hint">Tab-separated: taxid &rarr; hex color, one per line.</span>
+            </div>
+            <div class="form-group">
+              <label>Taxids file <span style="color:var(--error)">*</span></label>
+              <input type="file" id="ete-taxids" class="file-input" accept=".txt">
+              <span class="hint">One NCBI taxid per line.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-header">Options</div>
+          <div class="form-section-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="ete-max">Max domain count</label>
+                <input type="number" id="ete-max" placeholder="50 (default)" min="1">
+              </div>
+              <div class="form-group">
+                <label for="ete-port">ETE port</label>
+                <input type="number" id="ete-port" value="5002" min="1024" max="65535">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn btn-primary btn-run" id="ete-launch-btn" onclick="launchEteProfile()">
+          Launch ETE Profile
+        </button>
+      </div>
+
+      <div class="panel-right">
+        <div id="ete-alert" class="hidden"></div>
+        <div id="ete-viewer" class="hidden"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}

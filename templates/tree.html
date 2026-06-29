@@ -1,0 +1,475 @@
+{% extends "base.html" %}
+
+{% block title %}Phylogenetic Tree — UniProt Lab Manager{% endblock %}
+
+{% block page_header %}
+<h1>Phylogenetic Tree</h1>
+<p>Filter proteins by Pfam and taxonomy, run alignment and tree inference, view results.</p>
+{% endblock %}
+
+{% block content %}
+<div class="analysis-layout">
+
+  <!-- Left: all inputs -->
+  <div class="panel-left">
+
+    <!-- Protein Filters -->
+    <div class="form-section">
+      <div class="form-section-header">Protein Filters</div>
+      <div class="form-section-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="ver">UniProt Version</label>
+            <input type="text" id="ver" value="2026_01">
+          </div>
+          <div class="form-group">
+            <label for="pfam">Pfam IDs / HMM names</label>
+            <input type="text" id="pfam" placeholder="e.g. Homeodomain, PF00046">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="pfam-source">Pfam source</label>
+            <select id="pfam-source">
+              <option value="hmmsearch">hmmsearch</option>
+              <option value="uniprot">UniProt</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="pfam-logic">Multi-Pfam logic</label>
+            <select id="pfam-logic">
+              <option value="or">or (any Pfam)</option>
+              <option value="and">and (all Pfams)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>
+            <span class="checkbox-item">
+              <input type="checkbox" id="use-evalue">
+              Apply E-value cutoff
+            </span>
+          </label>
+          <input type="number" id="evalue" value="1e-5" step="any" class="hidden" style="margin-top:6px;">
+        </div>
+        <div class="form-group">
+          <label for="color-by">Colour branches by</label>
+          <select id="color-by">
+            <option value="taxon">Taxon</option>
+            <option value="pfam">Pfam</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Taxonomy -->
+    <div class="form-section">
+      <div class="form-section-header">Taxonomy</div>
+      <div class="form-section-body">
+        <div class="form-group">
+          <label for="taxids">Taxonomy IDs (comma separated)</label>
+          <input type="text" id="taxids" placeholder="e.g. 9606, 10090, 7227">
+          <span class="hint">Or upload a file (one ID per line)</span>
+          <input type="file" id="tax-file" class="file-input" accept=".txt">
+        </div>
+        <div class="form-group">
+          <label for="excl-taxids">Exclude Taxonomy IDs (optional)</label>
+          <input type="text" id="excl-taxids" placeholder="comma separated">
+          <input type="file" id="excl-file" class="file-input" accept=".txt">
+        </div>
+      </div>
+    </div>
+
+    <!-- Tree Parameters -->
+    <div class="form-section">
+      <div class="form-section-header">Tree Build</div>
+      <div class="form-section-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="prefix">Output prefix</label>
+            <input type="text" id="prefix" placeholder="e.g. myrun">
+          </div>
+          <div class="form-group">
+            <label for="output-dir">Output directory (optional)</label>
+            <input type="text" id="output-dir" placeholder="/path/to/results">
+          </div>
+        </div>
+        <div class="form-row three">
+          <div class="form-group">
+            <label for="aln">Aligner</label>
+            <select id="aln">
+              <option value="mafft">mafft</option>
+              <option value="einsi">einsi</option>
+              <option value="clustalo">clustalo</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="ml">Tree method</label>
+            <select id="ml">
+              <option value="fasttree">FastTree</option>
+              <option value="iqtree">IQ-TREE</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="trimal-th">trimAl -gt</label>
+            <input type="number" id="trimal-th" value="0.01" step="0.01" min="0" max="1">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="cpu">Threads</label>
+            <input type="number" id="cpu" value="4" min="1" max="64">
+          </div>
+          <div class="form-group" style="justify-content:flex-end;padding-top:18px;">
+            <label class="checkbox-item">
+              <input type="checkbox" id="no-ncbi" checked>
+              Skip NCBI annotation
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="local-fasta">Local FASTA path (optional)</label>
+          <input type="text" id="local-fasta" placeholder="/path/to/seqs.fa">
+        </div>
+        <div class="form-group">
+          <label for="colormap-file">Custom colormap (optional, taxid &lt;tab&gt; color per line)</label>
+          <input type="file" id="colormap-file" class="file-input" accept=".txt,.tsv,.tab">
+        </div>
+      </div>
+    </div>
+
+    <!-- Viewer -->
+    <div class="form-section">
+      <div class="form-section-header">Viewer</div>
+      <div class="form-section-body">
+        <div class="form-group">
+          <label>Display mode</label>
+          <div class="radio-group">
+            <label class="radio-item">
+              <input type="radio" name="viewer" value="d3" checked>
+              D3 interactive
+            </label>
+            <label class="radio-item">
+              <input type="radio" name="viewer" value="ete4">
+              ETE4 server
+            </label>
+            <label class="radio-item">
+              <input type="radio" name="viewer" value="ete4_static">
+              Static image
+            </label>
+          </div>
+        </div>
+
+        <div id="ete4-opts" class="hidden">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ete4-port">ETE4 port</label>
+              <input type="number" id="ete4-port" value="5001">
+            </div>
+            <div class="form-group" style="justify-content:flex-end;padding-top:18px;">
+              <label class="checkbox-item">
+                <input type="checkbox" id="attach-msa">
+                Attach MSA to leaves
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="msa-range">MSA display range (optional, e.g. 30:60)</label>
+            <input type="text" id="msa-range" placeholder="leave blank for full alignment">
+          </div>
+        </div>
+
+        <div id="static-layers-opts" class="hidden">
+          <div class="form-group">
+            <label>Static image layers</label>
+            <div class="checkbox-group">
+              <label class="checkbox-item"><input type="checkbox" class="layer-cb" value="names" checked> Leaf names</label>
+              <label class="checkbox-item"><input type="checkbox" class="layer-cb" value="domains" checked> Domain shapes</label>
+              <label class="checkbox-item"><input type="checkbox" class="layer-cb" value="colors" checked> Branch colouring</label>
+              <label class="checkbox-item"><input type="checkbox" class="layer-cb" value="gene" checked> Gene name labels</label>
+              <label class="checkbox-item"><input type="checkbox" class="layer-cb" value="msa"> Multiple sequence alignment</label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="ete4-port-static">ETE4 port</label>
+            <input type="number" id="ete4-port-static" value="5001">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-run" id="run-btn" onclick="runTree()">Run Tree Pipeline</button>
+  </div>
+
+  <!-- Right: status + results -->
+  <div class="panel-right">
+
+    <!-- Job status -->
+    <div id="status-panel" class="status-panel hidden">
+      <div class="status-header">
+        <div id="status-dot" class="status-dot running"></div>
+        <span id="status-text">Running pipeline…</span>
+      </div>
+      <pre id="status-log" class="status-log"></pre>
+    </div>
+
+    <!-- Alert area -->
+    <div id="alert-area" class="hidden"></div>
+
+    <!-- D3 tree -->
+    <div id="tree-d3-section" class="card hidden">
+      <div class="card-header">
+        <h2>Interactive Tree</h2>
+        <div class="flex gap-8">
+          <button class="btn btn-secondary btn-sm" id="tree-png-btn" onclick="renderStaticPng()">Render PNG</button>
+        </div>
+      </div>
+      <div class="tree-iframe-wrap" id="tree-iframe-wrap">
+        <iframe id="tree-iframe" src="about:blank"></iframe>
+      </div>
+      <div id="tree-downloads" class="download-bar hidden">
+        <span class="label">Download:</span>
+        <button class="btn btn-secondary btn-sm" id="dl-nwk-btn" onclick="downloadFile('newick')">Newick (.nwk)</button>
+        <button class="btn btn-secondary btn-sm hidden" id="dl-itol-btn" onclick="downloadFile('itol_colors')">iTOL colors</button>
+        <button class="btn btn-secondary btn-sm hidden" id="dl-dom-btn" onclick="downloadFile('itol_domains')">iTOL domains</button>
+      </div>
+    </div>
+
+    <!-- Static PNG tree -->
+    <div id="tree-static-section" class="card hidden">
+      <div class="card-header"><h2>Tree + Domain Architecture</h2></div>
+      <div id="tree-static-img"></div>
+      <div class="download-bar">
+        <span class="label">Download:</span>
+        <button class="btn btn-secondary btn-sm" onclick="downloadFile('png')">Tree PNG</button>
+      </div>
+    </div>
+
+    <!-- ETE4 iframe -->
+    <div id="tree-ete4-section" class="card hidden">
+      <div class="card-header"><h2>ETE4 Interactive Explorer</h2></div>
+      <div class="tree-iframe-wrap">
+        <iframe id="ete4-iframe" src="about:blank"></iframe>
+      </div>
+    </div>
+
+    <!-- Static PNG rendered via viz_utils -->
+    <div id="rendered-png-section" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <h2>Static PNG</h2>
+          <button class="btn btn-secondary btn-sm" id="dl-rendered-png-btn">Download</button>
+        </div>
+        <div id="rendered-png-wrap"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let currentJobId = null;
+let pollTimer = null;
+
+// Show/hide viewer-specific options
+document.querySelectorAll('input[name="viewer"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        const v = document.querySelector('input[name="viewer"]:checked').value;
+        document.getElementById('ete4-opts').classList.toggle('hidden', v !== 'ete4');
+        document.getElementById('static-layers-opts').classList.toggle('hidden', v !== 'ete4_static');
+    });
+});
+
+document.getElementById('use-evalue').addEventListener('change', function() {
+    document.getElementById('evalue').classList.toggle('hidden', !this.checked);
+});
+
+async function runTree() {
+    const pfam = document.getElementById('pfam').value.trim();
+    const prefix = document.getElementById('prefix').value.trim();
+    if (!pfam || !prefix) {
+        showAlert('alert-area', 'error', 'Pfam ID and output prefix are required.');
+        return;
+    }
+
+    // Clear previous results
+    ['tree-d3-section','tree-static-section','tree-ete4-section','rendered-png-section'].forEach(id => hideEl(id));
+    clearAlert('alert-area');
+    currentJobId = null;
+    if (pollTimer) clearInterval(pollTimer);
+
+    // Collect form data
+    const fd = new FormData();
+    fd.append('pfam', pfam);
+    fd.append('version', document.getElementById('ver').value.trim());
+    fd.append('prefix', prefix);
+    fd.append('output_dir', document.getElementById('output-dir').value.trim());
+    fd.append('aln', document.getElementById('aln').value);
+    fd.append('ml', document.getElementById('ml').value);
+    fd.append('trimal_th', document.getElementById('trimal-th').value);
+    fd.append('cpu', document.getElementById('cpu').value);
+    fd.append('no_ncbi', document.getElementById('no-ncbi').checked ? 'true' : 'false');
+    fd.append('pfam_source', document.getElementById('pfam-source').value);
+    fd.append('pfam_logic', document.getElementById('pfam-logic').value);
+    fd.append('color_by', document.getElementById('color-by').value);
+    fd.append('local_fasta', document.getElementById('local-fasta').value.trim());
+
+    if (document.getElementById('use-evalue').checked) {
+        fd.append('evalue', document.getElementById('evalue').value);
+    }
+
+    const viewer = document.querySelector('input[name="viewer"]:checked').value;
+    fd.append('viewer', viewer);
+
+    if (viewer === 'ete4') {
+        fd.append('ete4_port', document.getElementById('ete4-port').value);
+        fd.append('attach_msa', document.getElementById('attach-msa').checked ? 'true' : 'false');
+        fd.append('msa_range', document.getElementById('msa-range').value.trim());
+    }
+
+    if (viewer === 'ete4_static') {
+        fd.append('ete4_port', document.getElementById('ete4-port-static').value);
+        const layers = Array.from(document.querySelectorAll('.layer-cb:checked')).map(cb => cb.value);
+        fd.append('static_layers', layers.join(','));
+    }
+
+    const taxFile = document.getElementById('tax-file').files[0];
+    if (taxFile) fd.append('tax_file', taxFile);
+    else fd.append('taxids', document.getElementById('taxids').value.trim());
+
+    const exclFile = document.getElementById('excl-file').files[0];
+    if (exclFile) fd.append('excl_file', exclFile);
+    else fd.append('exclude_taxids', document.getElementById('excl-taxids').value.trim());
+
+    const cmapFile = document.getElementById('colormap-file').files[0];
+    if (cmapFile) fd.append('colormap', cmapFile);
+
+    // Submit
+    document.getElementById('run-btn').disabled = true;
+    showEl('status-panel');
+    document.getElementById('status-dot').className = 'status-dot running';
+    document.getElementById('status-text').textContent = 'Running pipeline…';
+    document.getElementById('status-log').textContent = '';
+
+    try {
+        const res = await fetch('/api/run-tree', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.error) {
+            showJobError(data.error);
+            return;
+        }
+        currentJobId = data.job_id;
+        pollTimer = setInterval(pollStatus, 3000);
+    } catch (e) {
+        showJobError(e.message);
+    }
+}
+
+async function pollStatus() {
+    if (!currentJobId) return;
+    try {
+        const res = await fetch(`/api/job/${currentJobId}`);
+        const data = await res.json();
+
+        if (data.log && data.log.length) {
+            document.getElementById('status-log').textContent = data.log.join('\n');
+        }
+
+        if (data.status === 'done') {
+            clearInterval(pollTimer);
+            document.getElementById('run-btn').disabled = false;
+            document.getElementById('status-dot').className = 'status-dot done';
+            document.getElementById('status-text').textContent = 'Done.';
+            showResult(data);
+        } else if (data.status === 'error') {
+            clearInterval(pollTimer);
+            showJobError(data.error);
+        }
+    } catch (e) {
+        clearInterval(pollTimer);
+        showJobError(e.message);
+    }
+}
+
+function showJobError(msg) {
+    document.getElementById('run-btn').disabled = false;
+    document.getElementById('status-dot').className = 'status-dot error';
+    document.getElementById('status-text').textContent = 'Error';
+    showAlert('alert-area', 'error', msg);
+}
+
+function showResult(data) {
+    const viewer = data.viewer;
+
+    if (viewer === 'd3') {
+        showEl('tree-d3-section');
+        document.getElementById('tree-iframe').src = `/api/tree-html/${currentJobId}`;
+        showEl('tree-downloads');
+        if (data.has_itol_colors) showEl('dl-itol-btn');
+        if (data.has_itol_domains) showEl('dl-dom-btn');
+    } else if (viewer === 'ete4') {
+        showEl('tree-ete4-section');
+        document.getElementById('ete4-iframe').src = `http://localhost:${data.port}/static/gui.html?tree=tree-1`;
+    } else if (viewer === 'ete4_static') {
+        loadStaticImage();
+    }
+}
+
+async function loadStaticImage() {
+    try {
+        const res = await fetch(`/api/tree-static-png/${currentJobId}`);
+        const data = await res.json();
+        if (data.png) {
+            showEl('tree-static-section');
+            document.getElementById('tree-static-img').innerHTML =
+                `<div class="result-img-wrap"><img src="data:image/png;base64,${data.png}"></div>`;
+        }
+    } catch (e) {
+        showAlert('alert-area', 'error', 'Could not load image: ' + e.message);
+    }
+}
+
+async function renderStaticPng() {
+    const btn = document.getElementById('tree-png-btn');
+    btn.disabled = true;
+    btn.textContent = 'Rendering…';
+    try {
+        const res = await fetch(`/api/tree-static-png/${currentJobId}`);
+        const data = await res.json();
+        if (data.png) {
+            showEl('rendered-png-section');
+            document.getElementById('rendered-png-wrap').innerHTML =
+                `<div class="result-img-wrap"><img src="data:image/png;base64,${data.png}"></div>`;
+            document.getElementById('dl-rendered-png-btn').onclick = () => {
+                const a = document.createElement('a');
+                a.href = `data:image/png;base64,${data.png}`;
+                a.download = 'tree.png';
+                a.click();
+            };
+        } else {
+            showAlert('alert-area', 'error', data.error || 'No image available.');
+        }
+    } catch (e) {
+        showAlert('alert-area', 'error', e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Render PNG';
+    }
+}
+
+function downloadFile(type) {
+    if (currentJobId) {
+        window.location.href = `/api/download/tree/${currentJobId}/${type}`;
+    }
+}
+
+// Restore state from previous run (if job_id stored)
+window.addEventListener('DOMContentLoaded', () => {
+    const saved = loadJobId('tree');
+    if (saved) {
+        currentJobId = saved;
+        // Don't auto-restore the tree to avoid stale data on refresh
+    }
+});
+</script>
+{% endblock %}

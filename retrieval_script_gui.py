@@ -1620,6 +1620,7 @@ elif choice == "High-Resolution Phylogenetic Profile":
                             for n in sp_tree.traverse():
                                 n.dist = 0.0
                             sp_tree.to_ultrametric(topological=True)
+                            sp_tree.annotate_ncbi_taxa(taxid_attr='name')
 
                             palette = [
                                 "#e6194B",

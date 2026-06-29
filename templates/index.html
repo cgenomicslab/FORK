@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}UniProt Lab Manager{% endblock %}
+
+{% block page_header %}
+<h1>UniProt Lab Manager</h1>
+<p>Local reference-proteome analysis suite — sequence retrieval, phylogenetics, and domain profiling for CGLab.</p>
+{% endblock %}
+
+{% block content %}
+
+<!-- Hero description -->
+<div class="home-hero">
+  <img src="/static/logo.png" alt="Logo" class="home-hero-logo">
+  <div class="home-hero-text">
+    <h2>Reference Proteome Analysis Suite</h2>
+    <p>
+      Query and explore a local mirror of UniProt reference proteomes.
+      Build phylogenetic trees, compute presence/absence matrices across
+      organisms, construct fine-grained phylogenetic profiles from
+      partitioned gene trees, and perform batch sequence and domain lookups.
+    </p>
+  </div>
+</div>
+
+<!-- Analysis modules -->
+<div class="home-section-title">Analysis Modules</div>
+<div class="home-grid">
+
+  <a class="home-card" href="/tree">
+    <div class="home-card-tag">Phylogenetics</div>
+    <h2>Phylogenetic Tree</h2>
+    <p>Fetch sequences by Pfam / taxon filters, align with MAFFT, infer a maximum-likelihood tree, and visualize interactively or export as a static figure.</p>
+  </a>
+
+  <a class="home-card" href="/presence">
+    <div class="home-card-tag">Comparative Genomics</div>
+    <h2>Presence / Absence</h2>
+    <p>Build a protein-family presence/absence matrix across organisms, render a clustered heatmap, and drill into any cell for sub-profiles and domain architectures.</p>
+  </a>
+
+  <a class="home-card" href="/highres">
+    <div class="home-card-tag">High-Resolution</div>
+    <h2>High-Res Profile</h2>
+    <p>Partition per-Pfam gene trees into subclades (paralog groups) and assemble a fine-grained phylogenetic profile that captures lineage-specific expansions.</p>
+  </a>
+
+</div>
+
+<!-- Tools + DB status -->
+<div class="home-section-title">Tools &amp; Status</div>
+<div class="home-secondary">
+
+  <a class="home-card" href="/utilities">
+    <div class="home-card-tag">Utilities</div>
+    <h2>Sequence &amp; Domain Tools</h2>
+    <p>Retrieve sequences by taxonomy / proteome / GO / Pfam, run HMM searches, look up domain coordinates, query GO&rarr;domain profiles, and extract branch sequences.</p>
+  </a>
+
+  <div class="home-card" style="cursor:default;">
+    <div class="home-card-tag">Database</div>
+    <h2>Connection Status</h2>
+    <div class="db-status-row">
+      <span class="db-status-icon" id="home-db-icon"></span>
+      <span id="home-db-text" class="text-muted" style="font-size:13px;">Checking&hellip;</span>
+    </div>
+    <p id="home-db-versions" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></p>
+  </div>
+
+</div>
+
+<script>
+(async () => {
+    const icon = document.getElementById('home-db-icon');
+    const text = document.getElementById('home-db-text');
+    const vers = document.getElementById('home-db-versions');
+    try {
+        const res  = await fetch('/api/db-info');
+        const data = await res.json();
+        if (data.error) {
+            icon.className = 'db-status-icon err';
+            text.textContent = 'Not connected';
+            text.style.color = 'var(--error)';
+            vers.textContent = data.error;
+        } else {
+            const versions = data.versions || [];
+            icon.className = 'db-status-icon ok';
+            text.textContent = 'Connected';
+            text.style.color = 'var(--success)';
+            if (versions.length) {
+                vers.textContent = 'Available versions: ' +
+                    versions.slice(0, 5).map(v => v.version || JSON.stringify(v)).join(', ') +
+                    (versions.length > 5 ? ' …' : '');
+            }
+        }
+    } catch (e) {
+        icon.className = 'db-status-icon err';
+        text.textContent = 'Connection error';
+        text.style.color = 'var(--error)';
+        vers.textContent = e.message;
+    }
+})();
+</script>
+
+{% endblock %}

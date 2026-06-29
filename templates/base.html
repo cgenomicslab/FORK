@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}UniProt Lab Manager{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+
+<!-- ================================================================
+     SITE HEADER
+     ================================================================ -->
+<header class="site-header">
+  <div class="header-inner">
+
+    <a href="/" class="header-brand">
+      <img src="/static/logo.png" alt="Logo">
+      <div>
+        <div class="brand-name">UniProt Lab Manager</div>
+        <div class="brand-sub">CGLab Reference Proteomes</div>
+      </div>
+    </a>
+
+    <nav class="main-nav">
+      <a href="/">Home</a>
+      <a href="/tree">Phylogenetic Tree</a>
+      <a href="/presence">Presence / Absence</a>
+      <a href="/highres">High-Res Profile</a>
+      <a href="/utilities">Utilities</a>
+    </nav>
+
+    <div class="header-tools">
+      <button class="db-connect-btn" id="db-toggle-btn">
+        <span class="db-dot" id="header-db-dot"></span>
+        Database
+      </button>
+    </div>
+
+  </div>
+</header>
+
+<!-- ================================================================
+     DB CONFIG PANEL
+     ================================================================ -->
+<div class="db-config-panel" id="db-panel">
+  <div class="db-panel-header">
+    <h3>Database Connection</h3>
+    <p>Override .env defaults for this session. Leave blank to use environment values.</p>
+  </div>
+  <div class="db-panel-body">
+    <div class="form-group">
+      <label for="db-host">Host</label>
+      <input type="text" id="db-host" placeholder="localhost" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label for="db-user">User</label>
+      <input type="text" id="db-user" placeholder="lab_user" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label for="db-password">Password</label>
+      <input type="password" id="db-password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <div class="form-group">
+      <label for="db-name">Database</label>
+      <input type="text" id="db-name" placeholder="uniprot_db_cglab" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label for="db-port">Port</label>
+      <input type="number" id="db-port" placeholder="3306" autocomplete="off">
+    </div>
+  </div>
+  <div class="db-panel-footer">
+    <span class="db-status-text" id="db-panel-status">—</span>
+    <button class="btn btn-sm btn-secondary" id="db-cancel-btn">Cancel</button>
+    <button class="btn btn-sm btn-primary" id="db-apply-btn">Apply</button>
+  </div>
+</div>
+
+<!-- ================================================================
+     MAIN CONTENT
+     ================================================================ -->
+<main class="site-main">
+  <div class="page-title-bar">
+    <div class="page-title-bar-inner">
+      {% block page_header %}{% endblock %}
+    </div>
+  </div>
+  <div class="page-body">
+    {% block content %}{% endblock %}
+  </div>
+</main>
+
+<!-- ================================================================
+     FOOTER
+     ================================================================ -->
+<footer class="site-footer">
+  <div class="footer-inner">
+    <p>UniProt Lab Manager &mdash; CGLab Reference Proteomes</p>
+    <p>
+      <a href="https://www.uniprot.org" target="_blank" rel="noreferrer">UniProt</a> &middot;
+      <a href="https://pfam.xfam.org"   target="_blank" rel="noreferrer">Pfam</a> &middot;
+      <a href="https://eggnogdb.org"    target="_blank" rel="noreferrer">EggNOG</a>
+    </p>
+  </div>
+</footer>
+
+<script src="/static/js/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
