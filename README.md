@@ -183,7 +183,7 @@ All managed via `uniprot-lab-manager.yml`.
 
 - Output files (`.fa`, `.mft`, `.nwk`, `.itol_*.txt`) are written to the path given by `--prefix` and excluded from version control via `.gitignore`.
 - The `.env` file contains credentials — never commit it.
-- For polished publication trees, load the `.nwk` + `.itol_colors.txt` + `.itol_domains.txt` files into [iTOL](https://itol.embl.de).
+- As an alternative for visualizing trees, load the `.nwk` + `.itol_colors.txt` + `.itol_domains.txt` files into [iTOL](https://itol.embl.de).
 - ETE4 interactive viewer requires port 5001 (default). The D3 viewer has no server dependency.
 - High-res profiling caches trees by build parameters; rerunning with the same settings reuses the cache.
 
