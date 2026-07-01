@@ -139,7 +139,7 @@ Columns are `Pfam·Subclade` pairs; the color stripe groups subclades by parent 
 
 Species tree with Phylogenetic Profile each taxon for the subclades of interest.
 
-![high-re profile ete tree](figures/phylogenetic_tree_ete.png)
+![high-re profile ete tree](figures/profile_ete.png)
 
 
 ---
