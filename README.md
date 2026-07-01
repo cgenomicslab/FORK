@@ -137,6 +137,11 @@ Split the Glycolytic gene tree into subclade groups (paralogs A/B/C…) and prof
 
 Columns are `Pfam·Subclade` pairs; the color stripe groups subclades by parent Pfam. Export as CSV or PNG.
 
+Species tree with Phylogenetic Profile each taxon for the subclades of interest.
+
+![high-re profile ete tree](figures/profile_ete.png)
+
+
 ---
 
 ## Repository structure
