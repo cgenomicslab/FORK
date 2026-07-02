@@ -893,27 +893,25 @@ if __name__ == "__main__":
                 def _draw_ortho_para(node):
                     evol_type = node.props.get("evoltype", None)
                     if evol_type == "D":
-                        return CircleFace(
-                            7,
-                            style={
-                                "fill": "rgba(255, 50, 50, 0.25)",
-                                "stroke": "rgba(255, 50, 50, 0.4)",
-                                "stroke-width": 1,
-                            },
-                            position="top",
-                            column=0,
-                        )
+                        return {
+                            "dot": {
+                                "shape": "circle",
+                                "fill": "#c81e1e",
+                                "stroke": "#960000",
+                                "stroke-width": 1.5,
+                                "radius": 7,
+                            }
+                        }
                     elif evol_type == "S":
-                        return CircleFace(
-                            7,
-                            style={
-                                "fill": "rgba(50, 50, 255, 0.15)",
-                                "stroke": "rgba(50, 50, 255, 0.3)",
-                                "stroke-width": 1,
-                            },
-                            position="top",
-                            column=0,
-                        )
+                        return {
+                            "dot": {
+                                "shape": "circle",
+                                "fill": "#1e1eb4",
+                                "stroke": "#000082",
+                                "stroke-width": 1.5,
+                                "radius": 7,
+                            }
+                        }
                     return None
 
                 ortho_para_layout = Layout(
