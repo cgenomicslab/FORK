@@ -20,7 +20,6 @@ from flask import Flask, render_template, request, jsonify, session, send_file, 
 
 import get_reference_uniprot_set_lib as uni
 import viz_utils as viz
-import interactive_tree_component as itc
 import subclade_partition as sp
 import tree_builder as tb
 from PIL import Image
@@ -440,28 +439,6 @@ def api_run_tree():
     return jsonify({"job_id": job_id})
 
 
-@app.route("/api/tree-html/<job_id>")
-def api_tree_html(job_id):
-    with _job_lock:
-        job = _jobs.get(job_id)
-    if not job or job["status"] != "done":
-        return "Not ready", 404
-    r = job["result"]
-    if r.get("viewer") != "d3":
-        return "Not a D3 job", 400
-
-    leaf_colors = None
-    cp = r.get("tree_path", "") + ".itol_colors.txt"
-    if cp and os.path.isfile(cp):
-        leaf_colors = itc.parse_itol_colors(cp)
-
-    return itc.build_tree_html(
-        newick_str=r["newick"],
-        leaf_colors=leaf_colors,
-        title=f"Phylogeny: {r.get('prefix', '')}",
-        height=800,
-    )
-
 
 @app.route("/api/tree-static-png/<job_id>")
 def api_tree_static_png(job_id):
@@ -863,23 +840,6 @@ def api_highres_list_nodes():
 
     return jsonify({"nodes": sp.list_internal_nodes(tree)})
 
-
-@app.route("/api/highres/tree-html", methods=["POST"])
-def api_highres_tree_html():
-    data = request.json or {}
-    with _job_lock:
-        job = _jobs.get(data.get("job_id"))
-    if not job or job["status"] != "done":
-        return "Not ready", 404
-
-    pfam = data.get("pfam")
-    r = job["result"]["tree_objects"].get(pfam, {})
-    tree_path = r.get("tree_path", "")
-    if not tree_path or not os.path.isfile(tree_path):
-        return "Tree file not found", 404
-
-    nwk = Path(tree_path).read_text()
-    return itc.build_tree_html(newick_str=nwk, title=pfam)
 
 
 @app.route("/api/highres/launch-ete4", methods=["POST"])

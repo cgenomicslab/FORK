@@ -462,8 +462,7 @@ function makePfamBlock(pfam, r) {
           <summary style="padding:8px 0;font-size:12px;">Show tree preview</summary>
           <div class="expander-body" style="padding:10px 0 0;">
             <div class="radio-group" style="margin-bottom:10px;">
-              <label class="radio-item"><input type="radio" name="tree-view-${pfam}" value="d3" checked> D3 interactive</label>
-              <label class="radio-item"><input type="radio" name="tree-view-${pfam}" value="ete4"> ETE4 server</label>
+              <label class="radio-item"><input type="radio" name="tree-view-${pfam}" value="ete4" checked> ETE4 server</label>
             </div>
             <button class="btn btn-secondary btn-sm" onclick="loadTreePreview('${pfam}')">Load tree</button>
             <div id="tree-preview-${pfam}" style="margin-top:10px;"></div>
@@ -591,49 +590,31 @@ async function loadNodeList(pfam) {
 }
 
 async function loadTreePreview(pfam) {
-    const mode = document.querySelector(`input[name="tree-view-${pfam}"]:checked`).value;
     const container = document.getElementById(`tree-preview-${pfam}`);
 
-    if (mode === 'd3') {
-        container.innerHTML = '<div class="tree-iframe-wrap" style="height:600px;"><iframe style="width:100%;height:600px;border:none;" id="tree-iframe-' + pfam + '" src="about:blank"></iframe></div>';
-
-        try {
-            const res = await fetch('/api/highres/tree-html', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ job_id: hrState.jobId, pfam }),
-            });
-            const html = await res.text();
-            const iframe = document.getElementById(`tree-iframe-${pfam}`);
-            iframe.srcdoc = html;
-        } catch (e) {
-            container.innerHTML = `<span class="text-muted">${e.message}</span>`;
+    // ETE4 server - ask user for port
+    const port = prompt('ETE4 port:', '5001');
+    if (!port) return;
+    container.innerHTML = `<p class="text-muted text-sm">Launching ETE4 on port ${port}…</p>`;
+    try {
+        const res = await fetch('/api/highres/launch-ete4', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: hrState.jobId, pfam, port: parseInt(port) }),
+        });
+        const data = await res.json();
+        if (data.error) {
+            container.innerHTML = `<span class="text-muted">${data.error}</span>`;
+        } else {
+            container.innerHTML = `
+              <div class="tree-iframe-wrap" style="height:700px;">
+                <iframe style="width:100%;height:700px;border:none;" src="http://localhost:${data.port}/static/gui.html?tree=tree-1"></iframe>
+              </div>
+              <button class="btn btn-danger btn-sm" style="margin-top:8px;" onclick="stopEte4('${data.ete_key}', '${pfam}')">Stop ETE4</button>
+            `;
         }
-    } else {
-        // ETE4 server - ask user for port
-        const port = prompt('ETE4 port:', '5001');
-        if (!port) return;
-        container.innerHTML = `<p class="text-muted text-sm">Launching ETE4 on port ${port}…</p>`;
-        try {
-            const res = await fetch('/api/highres/launch-ete4', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ job_id: hrState.jobId, pfam, port: parseInt(port) }),
-            });
-            const data = await res.json();
-            if (data.error) {
-                container.innerHTML = `<span class="text-muted">${data.error}</span>`;
-            } else {
-                container.innerHTML = `
-                  <div class="tree-iframe-wrap" style="height:700px;">
-                    <iframe style="width:100%;height:700px;border:none;" src="http://localhost:${data.port}/static/gui.html?tree=tree-1"></iframe>
-                  </div>
-                  <button class="btn btn-danger btn-sm" style="margin-top:8px;" onclick="stopEte4('${data.ete_key}', '${pfam}')">Stop ETE4</button>
-                `;
-            }
-        } catch (e) {
-            container.innerHTML = `<span class="text-muted">${e.message}</span>`;
-        }
+    } catch (e) {
+        container.innerHTML = `<span class="text-muted">${e.message}</span>`;
     }
 }
 
