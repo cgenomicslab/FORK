@@ -20,22 +20,17 @@ Mode 2 — Manual MRCA picking:
     one subclade. Leaves not under any picked MRCA go into 'unassigned'
     (or are dropped, depending on `include_unassigned`).
 
+Mode 3 - Partition by explicit ET4 node paths:
+    Picks all nodes the user names, based on ETE4 node paths. Leaves
+    not under any picked node are dropped entirely.
+
+Mode 4 - Partition the tree by duplication events based on taxonomic level:
+    The user selects a taxonomic level and based on duplication events, the tree
+    is split in subclades automatically.
+
 Labels are assigned A, B, C, ... in ladderized left-to-right order so
 that the column order in the final profile matrix is reproducible.
 
-Quick usage
------------
-    from ete4 import Tree
-    import subclade_partition as sp
-
-    tree = Tree(open("PF00041.nwk").read())
-    # Mode 1
-    parts = sp.partition_by_depth(tree, threshold=0.8)
-    # Mode 2
-    parts = sp.partition_by_mrca(tree, [
-        ["P12345_HUMAN", "Q67890_MOUSE"],   # -> MRCA of these two is subclade 1
-        ["O11111_DROME"],
-    ])
 """
 
 from typing import Dict, Iterable, List, Set, Union
@@ -225,7 +220,7 @@ def partition_by_mrca(
 
 
 # -----------------------------------------------------------------------------
-#     Partition the tree by explicit ETE4 node paths.
+# Mode 3 - Partition the tree by explicit ETE4 node paths.
 # -----------------------------------------------------------------------------
 
 
@@ -288,7 +283,7 @@ def list_internal_nodes(tree, max_nodes=300):
 
 
 # -----------------------------------------------------------------------------
-#     Partition the tree by duplication events based on taxonomic level
+# Mode 4: Partition the tree by duplication events based on taxonomic level
 # -----------------------------------------------------------------------------
 def _leaf_taxid(leaf_name):
     """Extract the NCBI taxid from a leaf name. Leaf names are 'taxid.accession'"""
@@ -309,9 +304,13 @@ def _target_species_set(tree, taxon_taxid, ncbi):
         taxid = _leaf_taxid(leaf.name)
         if taxid not in lineage_cache:
             try:
-                lineage_cache[taxid] = {str(t) for t in (ncbi.get_lineage(int(taxid)) or [])}
+                lineage_cache[taxid] = {
+                    str(t) for t in (ncbi.get_lineage(int(taxid)) or [])
+                }
             except Exception as e:
-                print(f"[partition_by_duplication] lineage lookup failed for taxid={taxid!r}: {e}")
+                print(
+                    f"[partition_by_duplication] lineage lookup failed for taxid={taxid!r}: {e}"
+                )
                 lineage_cache[taxid] = set()
         if taxon_taxid in lineage_cache[taxid]:
             target.add(taxid)
