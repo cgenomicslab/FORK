@@ -9,6 +9,9 @@ import threading
 import subprocess
 import tempfile
 from pathlib import Path
+from ete4 import NCBITaxa
+
+_ncbi = NCBITaxa()
 
 # Load .env from the same directory as this script, before any DB imports
 from dotenv import load_dotenv
@@ -16,7 +19,17 @@ from dotenv import load_dotenv
 _HERE = Path(__file__).resolve().parent
 load_dotenv(_HERE / ".env", override=False)
 
-from flask import Flask, render_template, request, jsonify, session, send_file, Response
+from flask import (
+    Flask,
+    render_template,
+    request,
+    jsonify,
+    session,
+    send_file,
+    Response,
+    stream_with_context,
+)
+import requests as _req
 
 import get_reference_uniprot_set_lib as uni
 import viz_utils as viz
@@ -28,6 +41,24 @@ Image.MAX_IMAGE_PIXELS = None
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(24)
+
+
+def _find_free_port(start=5001, end=5050):
+    """Return the first TCP port in [start, end) that is not already bound."""
+    for port in range(start, end):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(f"No free port found in range {start}–{end}")
+
+
+# Tracks every ETE4 port launched this session so /static/images/ requests
+# from PixiJS web workers can be forwarded to the right server.
+_ete4_ports: set = set()
+
 
 # In-memory store for background jobs (tree builds, etc.)
 _jobs = {}
@@ -85,6 +116,11 @@ def highres_page():
     return render_template("highres.html")
 
 
+@app.route("/profiling")
+def profiling_page():
+    return render_template("profiling.html")
+
+
 @app.route("/utilities")
 def utilities_page():
     return render_template("utilities.html")
@@ -109,27 +145,27 @@ def api_db_config():
 @app.route("/api/db-defaults")
 def api_db_defaults():
     """Return current env-based DB defaults and seed Flask session so connection works immediately."""
-    host     = os.getenv("DB_HOST", "localhost")
-    user     = os.getenv("DB_USER", "")
+    host = os.getenv("DB_HOST", "localhost")
+    user = os.getenv("DB_USER", "")
     database = os.getenv("DB_NAME", "")
-    port     = os.getenv("DB_PORT", "3306")
+    port = os.getenv("DB_PORT", "3306")
     password = os.getenv("DB_PASSWORD", "")
 
     # Seed session from env vars on first load so _get_config() works without
     # requiring the user to manually open and submit the DB panel.
     if not session.get("db_host"):
-        session["db_host"]     = host
-        session["db_user"]     = user
+        session["db_host"] = host
+        session["db_user"] = user
         session["db_password"] = password
-        session["db_name"]     = database
-        session["db_port"]     = port
+        session["db_name"] = database
+        session["db_port"] = port
 
     return jsonify(
         {
-            "host":     host,
-            "user":     user,
+            "host": host,
+            "user": user,
             "database": database,
-            "port":     port,
+            "port": port,
         }
     )
 
@@ -206,7 +242,6 @@ def api_run_tree():
     msa_range = f.get("msa_range", "").strip()
     local_fasta = f.get("local_fasta", "").strip()
     viewer = f.get("viewer", "d3")
-    ete4_port = int(f.get("ete4_port", 5001))
     attach_msa = f.get("attach_msa") == "true"
     static_layers = f.get("static_layers", "names,domains,colors,gene")
 
@@ -288,6 +323,8 @@ def api_run_tree():
             env["QT_QPA_PLATFORM"] = "offscreen"
 
             if viewer == "ete4":
+                ete4_port = _find_free_port()
+                _ete4_ports.add(ete4_port)
                 cmd += ["--port", str(ete4_port)]
                 if attach_msa:
                     cmd += ["--MSA"]
@@ -326,6 +363,7 @@ def api_run_tree():
                     )
 
             elif viewer == "ete4_static":
+                ete4_port = _find_free_port()
                 cmd += ["--port", str(ete4_port), "--render_ete_static", "--no_explore"]
                 if static_layers:
                     cmd += ["--static_layers", static_layers]
@@ -437,7 +475,6 @@ def api_run_tree():
 
     threading.Thread(target=run, daemon=True).start()
     return jsonify({"job_id": job_id})
-
 
 
 @app.route("/api/tree-static-png/<job_id>")
@@ -787,6 +824,7 @@ def api_highres_partition():
     job_id = data.get("job_id")
     pfam = data.get("pfam")
     mode = data.get("mode", "depth")
+    taxon_level = data.get("taxon_level")
 
     with _job_lock:
         job = _jobs.get(job_id)
@@ -811,6 +849,10 @@ def api_highres_partition():
         elif mode == "node_path":
             paths = [[int(x) for x in p] for p in data.get("paths", [])]
             parts = sp.partition_by_node_path(tree, paths)
+        elif (
+            mode == "auto_duplication"
+        ):  # auto split base on duplication events, by taxonomic level
+            parts = sp.partition_by_duplication(tree, taxon_level, NCBITaxa())
         else:
             return jsonify({"error": "Unknown mode."}), 400
 
@@ -841,13 +883,11 @@ def api_highres_list_nodes():
     return jsonify({"nodes": sp.list_internal_nodes(tree)})
 
 
-
 @app.route("/api/highres/launch-ete4", methods=["POST"])
 def api_highres_launch_ete4():
     data = request.json or {}
     job_id = data.get("job_id")
     pfam = data.get("pfam")
-    port = int(data.get("port", 5001))
 
     with _job_lock:
         job = _jobs.get(job_id)
@@ -857,13 +897,10 @@ def api_highres_launch_ete4():
     r = job["result"]["tree_objects"].get(pfam, {})
     ver = job["result"].get("version", "2026_01")
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        sock.bind(("localhost", port))
-    except OSError:
-        sock.close()
-        return jsonify({"error": f"Port {port} is already in use."}), 400
-    sock.close()
+        port = _find_free_port()
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
 
     env = os.environ.copy()
     env["QT_QPA_PLATFORM"] = "offscreen"
@@ -895,6 +932,7 @@ def api_highres_launch_ete4():
     if not connected:
         return jsonify({"error": "ETE4 server did not start in time."}), 500
 
+    _ete4_ports.add(port)
     ete_key = f"ete4_{job_id}_{pfam}"
     with _job_lock:
         _jobs[ete_key] = {"pid": proc.pid, "port": port}
@@ -1339,11 +1377,15 @@ def api_highres_species_tree():
 @app.route("/api/highres/ete-matrix-viz", methods=["POST"])
 def api_highres_ete_matrix_viz():
     matrix_csv = request.form.get("matrix_csv", "")
-    port = int(request.form.get("port", 5003))
     files = request.files
 
     if not matrix_csv:
         return jsonify({"error": "No matrix data provided."}), 400
+
+    try:
+        port = _find_free_port()
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
 
     mat_tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
     mat_tmp.write(matrix_csv)
@@ -1388,6 +1430,7 @@ def api_highres_ete_matrix_viz():
         proc.kill()
         return jsonify({"error": "ETE profile viewer did not start in time."}), 500
 
+    _ete4_ports.add(port)
     return jsonify({"ok": True, "port": port, "pid": proc.pid})
 
 
@@ -1408,8 +1451,12 @@ def api_ete_profile_launch():
     if "taxids" not in files or not files["taxids"].filename:
         return jsonify({"error": "taxids file is required."}), 400
 
-    port = int(form.get("port", 5002))
     max_val = form.get("max", "").strip()
+
+    try:
+        port = _find_free_port()
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
 
     tblout_tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=".tblout", delete=False)
     colormap_tmp = tempfile.NamedTemporaryFile(
@@ -1462,7 +1509,189 @@ def api_ete_profile_launch():
         proc.kill()
         return jsonify({"error": "ETE profile server did not start in time."}), 500
 
+    _ete4_ports.add(port)
     return jsonify({"ok": True, "port": port, "pid": proc.pid})
+
+
+# ==============================================================================================================
+#                                           ETE4 PROXY ROUTES
+# Routes that forward the browser's requests to a locally-running ETE4 bottle server,
+# so the browser never needs a direct SSH tunnel to the ETE4 port.
+# ==============================================================================================================
+
+
+@app.route("/ete4/gui")
+def ete4_gui():
+    """Serve ETE4's gui.html with asset paths and fetch() calls rewritten to go through Flask."""
+    port = request.args.get("port", type=int)
+    if not port:
+        return "Missing ?port parameter", 400
+    try:
+        resp = _req.get(f"http://127.0.0.1:{port}/static/gui.html", timeout=5)
+    except Exception as e:
+        return f"ETE4 server on port {port} is not reachable: {e}", 502
+
+    html = resp.text
+
+    # Inject <base> so that relative paths in gui.html (e.g. href="gui.css",
+    # href="images/icon.png") resolve through our proxy instead of to /ete4/*.
+    html = html.replace("<head>", f'<head><base href="/ete4/{port}/static/">')
+
+    # Rewrite root-relative /static/ asset references so they go through our proxy.
+    # (<base> only handles relative URLs; root-relative ones still need rewrites.)
+    html = html.replace('href="/static/', f'href="/ete4/{port}/static/')
+    html = html.replace('src="/static/', f'src="/ete4/{port}/static/')
+
+    # Inject a tiny fetch() interceptor before any other script runs.
+    # ETE4's JS calls fetch("/trees/...") and fetch("/load") with root-relative paths.
+    # We redirect those through /ete4/<port>/... so Flask can proxy them to the right server.
+    intercept = f"""<script>
+(function(){{
+  var _f = window.fetch.bind(window);
+  window.fetch = function(url, opts){{
+    if (typeof url === 'string') {{
+      if (url.startsWith('/trees') || url.startsWith('/load') || url.startsWith('/static/')) {{
+        url = '/ete4/{port}' + url;
+      }} else {{
+        var _o = window.location.origin;
+        if (url.startsWith(_o + '/static/') || url.startsWith(_o + '/trees') || url.startsWith(_o + '/load')) {{
+          url = _o + '/ete4/{port}' + url.slice(_o.length);
+        }}
+      }}
+    }}
+    return _f(url, opts);
+  }};
+  // Remove 'port' from the visible URL so ETE4's set_query_string_values()
+  // doesn't flag it as an unknown parameter and show the Swal warning.
+  (function(){{
+    var p = new URLSearchParams(location.search);
+    p.delete('port');
+    var qs = p.toString();
+    history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+  }})();
+  // Call reset_view() once the page is fully loaded and the iframe has
+  // settled to its actual height. ETE4 initialises with a small offsetHeight
+  // (whatever the iframe had before layout), so the initial zoom is wrong.
+  // We re-fit the tree after the load event + a short pause so the async
+  // init (init_trees, init_pixi) has completed and tree_size is populated.
+  window.addEventListener('load', function() {{
+    var attempts = 0;
+    var t = setInterval(function() {{
+      attempts++;
+      if (typeof window.__ete4_reset_view === 'function') {{
+        window.__ete4_reset_view();
+        clearInterval(t);
+      }} else if (attempts >= 30) {{
+        clearInterval(t);
+      }}
+    }}, 200);
+  }});
+}})();
+</script>
+"""
+    html = html.replace("</head>", intercept + "</head>")
+    return html
+
+
+@app.route("/ete4/<int:port>/static/<path:path>")
+def ete4_static_proxy(port, path):
+    """Forward ETE4 static file requests (JS, CSS, images) to the ETE4 bottle server."""
+    try:
+        resp = _req.get(f"http://127.0.0.1:{port}/static/{path}", timeout=10)
+    except Exception:
+        return "ETE4 server unavailable", 502
+    # Expose reset_view globally so our injected script can call it after
+    # the iframe reaches its final height.
+    if path == "js/gui.js":
+        patched = (
+            resp.text
+            + "\nwindow.__ete4_reset_view = function() { try { reset_view(); } catch(e) {} };\n"
+        )
+        return Response(patched, content_type="application/javascript")
+    return Response(
+        resp.content,
+        content_type=resp.headers.get("Content-Type", "application/octet-stream"),
+    )
+
+
+@app.route("/static/images/<path:filename>")
+def ete4_static_images_fallback(filename):
+    """Catch /static/images/* requests from PixiJS web workers.
+
+    PixiJS resolves the spritesheet PNG relative to the URL it stored before
+    our fetch interceptor rewrote it, so the worker ends up requesting
+    /static/images/spritesheet.png (no port in the path). We try every ETE4
+    port launched this session and return the first successful response.
+    """
+    for port in list(_ete4_ports):
+        try:
+            resp = _req.get(
+                f"http://127.0.0.1:{port}/static/images/{filename}", timeout=3
+            )
+            if resp.status_code == 200:
+                return Response(
+                    resp.content,
+                    content_type=resp.headers.get(
+                        "Content-Type", "application/octet-stream"
+                    ),
+                )
+        except Exception:
+            continue
+    return "Not found", 404
+
+
+@app.route("/ete4/<int:port>/trees", methods=["GET", "POST", "PUT", "DELETE"])
+@app.route("/ete4/<int:port>/trees/<path:p>", methods=["GET", "POST", "PUT", "DELETE"])
+def ete4_trees_proxy(port, p=""):
+    """Forward all /trees/... API calls from ETE4's JS to the correct ETE4 server instance."""
+    target = f"http://127.0.0.1:{port}/trees"
+    if p:
+        target += f"/{p}"
+    # Strip Accept-Encoding so ETE4 does not brotli-compress the response;
+    # this avoids having to decompress-then-re-compress in the proxy layer.
+    fwd_headers = {
+        k: v
+        for k, v in request.headers
+        if k.lower() not in ("host", "content-length", "accept-encoding")
+    }
+    try:
+        resp = _req.request(
+            method=request.method,
+            url=target,
+            params=request.args,
+            headers=fwd_headers,
+            data=request.get_data(),
+            timeout=30,
+            stream=True,
+        )
+        # Forward response headers except hop-by-hop ones Flask cannot re-send.
+        skip = {"content-encoding", "content-length", "transfer-encoding", "connection"}
+        out_headers = {k: v for k, v in resp.headers.items() if k.lower() not in skip}
+        return Response(
+            stream_with_context(resp.iter_content(chunk_size=4096)),
+            status=resp.status_code,
+            headers=out_headers,
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
+@app.route("/ete4/<int:port>/load", methods=["POST"])
+def ete4_load_proxy(port):
+    """Forward /load calls (used by ETE4's upload UI) to the ETE4 server."""
+    try:
+        resp = _req.post(
+            f"http://127.0.0.1:{port}/load",
+            json=request.get_json(),
+            timeout=10,
+        )
+        return Response(
+            resp.content,
+            status=resp.status_code,
+            content_type=resp.headers.get("Content-Type", "application/json"),
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
 
 if __name__ == "__main__":

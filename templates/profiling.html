@@ -1,13 +1,169 @@
 {% extends "base.html" %}
 
-{% block title %}High-Resolution Profile — UniProt Lab Manager{% endblock %}
+{% block title %}Phylogenetic Profiling — UniProt Lab Manager{% endblock %}
 
 {% block page_header %}
-<h1>High-Resolution Phylogenetic Profile</h1>
-<p>Build per-Pfam gene trees, partition them into subclades, then assemble a fine-grained presence/absence matrix.</p>
+<h1>Phylogenetic Profiling</h1>
+<p>Domain presence/absence matrix across taxa, and high-resolution phylogenetic profiling.</p>
 {% endblock %}
 
 {% block content %}
+
+<!-- Sub-tab navigation -->
+<div style="display:flex;gap:0;margin-bottom:24px;border-bottom:2px solid var(--border);">
+  <button class="section-tab-btn active" onclick="switchSection('pa')"
+    style="padding:10px 20px;background:none;border:none;border-bottom:3px solid var(--primary);margin-bottom:-2px;font-weight:600;cursor:pointer;color:var(--primary);">
+    Domain Presence / Absence
+  </button>
+  <button class="section-tab-btn" onclick="switchSection('hr')"
+    style="padding:10px 20px;background:none;border:none;border-bottom:3px solid transparent;margin-bottom:-2px;font-weight:600;cursor:pointer;color:var(--text-muted);">
+    High Resolution Phylogenetic Profiling
+  </button>
+</div>
+
+<!-- ================================================================
+     SECTION 1: DOMAIN PRESENCE / ABSENCE
+     ================================================================ -->
+<div id="section-pa">
+
+<div class="analysis-layout">
+
+  <!-- Left: filters -->
+  <div class="panel-left">
+
+    <div class="form-section">
+      <div class="form-section-header">Filters</div>
+      <div class="form-section-body">
+        <div class="form-group">
+          <label for="pa-ver">UniProt Version</label>
+          <input type="text" id="pa-ver" value="2026_01">
+        </div>
+        <div class="form-group">
+          <label for="pa-pfam-input">Pfam Names / Accessions</label>
+          <input type="text" id="pa-pfam-input" placeholder="e.g. Homeodomain, PF00046, PBC">
+          <span class="hint">Comma separated. Multiple entries build multi-column matrix.</span>
+        </div>
+        <div class="form-group">
+          <label for="pa-taxids">Taxonomy IDs (comma separated, leave blank for all)</label>
+          <input type="text" id="pa-taxids" placeholder="e.g. 9606, 10090, 7227">
+          <span class="hint">Or upload a file (one ID per line)</span>
+          <input type="file" id="pa-tax-file" class="file-input" accept=".txt">
+        </div>
+        <div class="form-group">
+          <label class="checkbox-item">
+            <input type="checkbox" id="pa-use-evalue">
+            Apply E-value cutoff
+          </label>
+          <input type="number" id="pa-evalue" value="1e-5" step="any" class="hidden" style="margin-top:6px;">
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-run" id="pa-build-btn" onclick="buildMatrix()">Build Matrix</button>
+
+    <div id="pa-alert-area" class="hidden"></div>
+
+    <!-- Co-occurrence controls (appear after matrix is built) -->
+    <div id="pa-drilldown-controls" class="form-section hidden">
+      <div class="form-section-header">Domain Co-occurrence</div>
+      <div class="form-section-body">
+        <div class="form-group">
+          <label for="pa-sel-taxon">Organism</label>
+          <select id="pa-sel-taxon"></select>
+        </div>
+        <div class="form-group">
+          <label for="pa-sel-profile">Profile</label>
+          <select id="pa-sel-profile"></select>
+        </div>
+        <div id="pa-cell-count-label" class="text-muted text-sm"></div>
+        <button class="btn btn-primary btn-run" id="pa-drill-btn" onclick="doDrillDown()">Analyse</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Right: results -->
+  <div class="panel-right">
+
+    <!-- Loading spinner -->
+    <div id="pa-loading-area" class="hidden">
+      <div class="status-panel">
+        <div class="status-header">
+          <div class="status-dot running"></div>
+          <span id="pa-loading-text">Querying database…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Matrix results -->
+    <div id="pa-matrix-section" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <h2>Presence / Absence Matrix</h2>
+          <button class="btn btn-secondary btn-sm" id="pa-dl-matrix-btn" onclick="downloadMatrix()">Download CSV</button>
+        </div>
+        <div class="card-body">
+          <p class="text-muted text-sm" style="margin-bottom:12px;">Cell values = distinct proteins. Rows = organisms, columns = profiles.</p>
+          <div id="pa-matrix-table"></div>
+        </div>
+        <div id="pa-heatmap-section" class="hidden">
+          <hr class="divider" style="margin:0;">
+          <div class="card-body">
+            <h3 style="font-size:13px;font-weight:600;margin-bottom:12px;">Clustered Heatmap</h3>
+            <div id="pa-heatmap-img"></div>
+            <div style="margin-top:10px;">
+              <button class="btn btn-secondary btn-sm" id="pa-dl-heatmap-btn" onclick="downloadHeatmap()">Download PNG</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Co-occurrence results -->
+    <div id="pa-drill-results-section" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <h2 id="pa-drill-title">Co-occurrence results</h2>
+        </div>
+        <div class="card-body">
+          <div class="tabs" id="pa-drill-tabs">
+            <button class="tab-btn" data-tab="pa-tab-subprofiles">Co-occurring Domains</button>
+            <button class="tab-btn" data-tab="pa-tab-architectures">Domain Architectures</button>
+          </div>
+
+          <div id="pa-tab-subprofiles" class="tab-content">
+            <p class="text-muted text-sm" style="margin-bottom:10px;">Domains co-occurring on the same proteins as the selected profile, ranked by frequency. The query profile itself is excluded.</p>
+            <div id="pa-subprofiles-table"></div>
+          </div>
+
+          <div id="pa-tab-architectures" class="tab-content">
+            <p class="text-muted text-sm" style="margin-bottom:10px;">Domain architecture patterns, ranked by frequency.</p>
+            <div id="pa-architectures-table"></div>
+            <div id="pa-arch-diagram-controls" class="hidden" style="margin-top:14px;">
+              <div class="form-row" style="align-items:flex-end;gap:8px;">
+                <div class="form-group" style="flex:1;">
+                  <label for="pa-sel-arch">Draw diagram for pattern</label>
+                  <select id="pa-sel-arch"></select>
+                </div>
+                <button class="btn btn-secondary btn-sm" style="white-space:nowrap;align-self:flex-end;" onclick="drawArchDiagram()">Draw</button>
+              </div>
+            </div>
+            <div id="pa-arch-diagram" class="hidden" style="margin-top:12px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</div><!-- end #section-pa -->
+
+
+<!-- ================================================================
+     SECTION 2: HIGH RESOLUTION PHYLOGENETIC PROFILING
+     ================================================================ -->
+<div id="section-hr" style="display:none;">
 
 <!-- Step indicators -->
 <div class="steps" id="step-bar">
@@ -130,7 +286,7 @@
     </div>
   </div>
 
-  <!-- 2b. Species (NCBI) Tree — static PNG, reconstructed from Streamlit section -->
+  <!-- Species (NCBI) Tree -->
   <div class="card" style="margin-bottom:20px;">
     <div class="card-header">
       <h2>Species Tree (NCBI taxonomy)</h2>
@@ -240,669 +396,7 @@
   </div>
 </div>
 
-<script>
-let hrState = {
-    jobId:     null,
-    summary:   null,
-    partitions: {},   // {pfam: {label: [leaf_names]}}
-    matrixCsv: null,  // stored after computeProfile() for ETE matrix viz
-};
-
-// Tree viewer iframes: {pfam: iframe_element}
-let pfamIframes = {};
-
-function setStep(n) {
-    [1,2,3].forEach(i => {
-        const s = document.getElementById(`step${i}`);
-        if (i < n) s.className = 'step done';
-        else if (i === n) s.className = 'step active';
-        else s.className = 'step';
-    });
-}
-
-async function buildTrees() {
-    const pfamText = document.getElementById('pfam-text').value.trim();
-    if (!pfamText) {
-        showAlert('build-alert', 'error', 'Enter at least one Pfam ID.');
-        return;
-    }
-
-    hrState.partitions = {};
-    hrState.jobId = null;
-    hideEl('step2-section');
-    hideEl('step3-section');
-    clearAlert('build-alert');
-    setStep(1);
-
-    const fd = new FormData();
-    fd.append('pfams', pfamText);
-    fd.append('version', document.getElementById('ver').value.trim());
-    fd.append('output_root', document.getElementById('output-root').value.trim());
-    fd.append('aln', document.getElementById('aln').value);
-    fd.append('ml', document.getElementById('ml').value);
-    fd.append('gt', document.getElementById('gt').value);
-    fd.append('cpu', document.getElementById('cpu').value);
-
-    const evalue = document.getElementById('evalue').value.trim();
-    if (evalue) fd.append('evalue', evalue);
-
-    const taxFile = document.getElementById('tax-file').files[0];
-    if (taxFile) fd.append('tax_file', taxFile);
-    else fd.append('taxids', document.getElementById('taxids').value.trim());
-
-    const exclFile = document.getElementById('excl-file').files[0];
-    if (exclFile) fd.append('excl_file', exclFile);
-    else fd.append('exclude_taxids', document.getElementById('excl-taxids').value.trim());
-
-    document.getElementById('build-btn').disabled = true;
-    showEl('build-status');
-    document.getElementById('build-dot').className = 'status-dot running';
-    document.getElementById('build-status-text').textContent = 'Building trees…';
-    document.getElementById('build-log').textContent = '';
-
-    try {
-        const res = await fetch('/api/highres/build-trees', { method: 'POST', body: fd });
-        const data = await res.json();
-        if (data.error) {
-            showJobError(data.error);
-            return;
-        }
-        hrState.jobId = data.job_id;
-        pollBuildStatus();
-    } catch (e) {
-        showJobError(e.message);
-    }
-}
-
-let pollTimer = null;
-function pollBuildStatus() {
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(async () => {
-        if (!hrState.jobId) return;
-        try {
-            const res = await fetch(`/api/highres/job/${hrState.jobId}`);
-            const data = await res.json();
-
-            if (data.log && data.log.length) {
-                document.getElementById('build-log').textContent = data.log.join('\n');
-            }
-
-            if (data.status === 'done') {
-                clearInterval(pollTimer);
-                document.getElementById('build-btn').disabled = false;
-                document.getElementById('build-dot').className = 'status-dot done';
-                document.getElementById('build-status-text').textContent = 'Done.';
-                hrState.summary = data.summary;
-                showStep2(data.summary);
-            } else if (data.status === 'error') {
-                clearInterval(pollTimer);
-                showJobError(data.error);
-            }
-        } catch (e) {
-            clearInterval(pollTimer);
-            showJobError(e.message);
-        }
-    }, 3000);
-}
-
-function showJobError(msg) {
-    document.getElementById('build-btn').disabled = false;
-    document.getElementById('build-dot').className = 'status-dot error';
-    document.getElementById('build-status-text').textContent = 'Error';
-    showAlert('build-alert', 'error', msg);
-}
-
-function showStep2(summary) {
-    setStep(2);
-
-    // Summary table
-    const rows = Object.entries(summary).map(([pfam, r]) => ({
-        Pfam: pfam,
-        Status: r.error ? `ERROR: ${r.error.slice(0,60)}` : 'OK',
-        Cached: r.cached ? 'yes' : 'no',
-        Leaves: r.n_leaves,
-        'Max depth': r.max_depth.toFixed(4),
-    }));
-    document.getElementById('summary-table').innerHTML = makeTable(rows, ['Pfam','Status','Cached','Leaves','Max depth']);
-
-    // Per-Pfam partition blocks
-    const container = document.getElementById('pfam-blocks');
-    container.innerHTML = '';
-    pfamIframes = {};
-
-    Object.entries(summary).forEach(([pfam, r]) => {
-        if (r.error) return;
-        container.appendChild(makePfamBlock(pfam, r));
-    });
-
-    showEl('step2-section');
-    updatePartitionStatus();
-}
-
-function makePfamBlock(pfam, r) {
-    const div = document.createElement('div');
-    div.className = 'pfam-block';
-    div.style.marginBottom = '16px';
-    div.id = `pfam-block-${pfam}`;
-
-    const locked = hrState.partitions[pfam];
-
-    div.innerHTML = `
-      <div class="pfam-block-header">
-        <span>${pfam}</span>
-        <span class="badge ${locked ? 'badge-green' : 'badge-gray'}" id="lock-badge-${pfam}">
-          ${locked ? `Locked (${Object.keys(locked).length} subclades)` : 'Not locked'}
-        </span>
-        <span class="text-muted text-sm" style="margin-left:auto;">${r.n_leaves} leaves · max depth ${r.max_depth.toFixed(4)}</span>
-      </div>
-      <div class="pfam-block-body">
-
-        <!-- Mode selector -->
-        <div class="form-group" style="margin-bottom:12px;">
-          <label>Partition mode</label>
-          <div class="radio-group">
-            <label class="radio-item"><input type="radio" name="mode-${pfam}" value="depth" checked onchange="onModeChange('${pfam}')"> Depth slider</label>
-            <label class="radio-item"><input type="radio" name="mode-${pfam}" value="mrca" onchange="onModeChange('${pfam}')"> Manual MRCA</label>
-            <label class="radio-item"><input type="radio" name="mode-${pfam}" value="node_path" onchange="onModeChange('${pfam}')"> Node path</label>
-          </div>
-        </div>
-
-        <!-- Depth slider -->
-        <div id="depth-ctrl-${pfam}">
-          <div class="form-group">
-            <label>Cut depth (0 – ${r.max_depth.toFixed(4)})</label>
-            <input type="range" id="depth-slider-${pfam}"
-              min="0" max="${r.max_depth * 1.01}"
-              step="${r.max_depth / 200}"
-              value="${(r.max_depth * 0.5).toFixed(4)}"
-              oninput="document.getElementById('depth-val-${pfam}').textContent = parseFloat(this.value).toFixed(4)">
-            <div class="slider-val" id="depth-val-${pfam}">${(r.max_depth * 0.5).toFixed(4)}</div>
-          </div>
-        </div>
-
-        <!-- MRCA controls -->
-        <div id="mrca-ctrl-${pfam}" class="hidden">
-          <div class="form-group">
-            <label>Leaf-name groups (one group per line, comma-separated)</label>
-            <textarea id="mrca-text-${pfam}" rows="4" placeholder="# Each line defines one subclade&#10;${r.leaves.slice(0,2).join(', ')}"></textarea>
-          </div>
-          <label class="checkbox-item" style="margin-top:4px;">
-            <input type="checkbox" id="unassigned-${pfam}" checked>
-            Include 'unassigned' bucket
-          </label>
-        </div>
-
-        <!-- Node path controls -->
-        <div id="nodepath-ctrl-${pfam}" class="hidden">
-          <div style="margin-bottom:8px;">
-            <button class="btn btn-secondary btn-sm" onclick="loadNodeList('${pfam}')">Show node list</button>
-          </div>
-          <div id="nodelist-${pfam}" class="hidden" style="margin-bottom:10px;max-height:180px;overflow-y:auto;"></div>
-          <div class="form-group">
-            <label>Node paths (one per line, comma-separated indices)</label>
-            <textarea id="nodepath-text-${pfam}" rows="4" placeholder="# e.g.&#10;0,1&#10;1,0"></textarea>
-          </div>
-        </div>
-
-        <!-- Partition preview -->
-        <div id="partition-preview-${pfam}" class="hidden partition-preview"></div>
-
-        <!-- Action buttons -->
-        <div class="flex gap-8" style="margin-top:12px;">
-          <button class="btn btn-secondary btn-sm" onclick="previewPartition('${pfam}')">Preview</button>
-          <button class="btn btn-primary btn-sm" id="lock-btn-${pfam}" onclick="lockPartition('${pfam}')">Use this partition</button>
-        </div>
-
-        <!-- Tree preview expander -->
-        <details style="margin-top:14px;" class="expander" style="border:none;background:transparent;">
-          <summary style="padding:8px 0;font-size:12px;">Show tree preview</summary>
-          <div class="expander-body" style="padding:10px 0 0;">
-            <div class="radio-group" style="margin-bottom:10px;">
-              <label class="radio-item"><input type="radio" name="tree-view-${pfam}" value="ete4" checked> ETE4 server</label>
-            </div>
-            <button class="btn btn-secondary btn-sm" onclick="loadTreePreview('${pfam}')">Load tree</button>
-            <div id="tree-preview-${pfam}" style="margin-top:10px;"></div>
-          </div>
-        </details>
-
-      </div>
-    `;
-
-    return div;
-}
-
-function onModeChange(pfam) {
-    const mode = document.querySelector(`input[name="mode-${pfam}"]:checked`).value;
-    document.getElementById(`depth-ctrl-${pfam}`).classList.toggle('hidden', mode !== 'depth');
-    document.getElementById(`mrca-ctrl-${pfam}`).classList.toggle('hidden', mode !== 'mrca');
-    document.getElementById(`nodepath-ctrl-${pfam}`).classList.toggle('hidden', mode !== 'node_path');
-}
-
-async function previewPartition(pfam) {
-    const payload = buildPartitionPayload(pfam);
-    if (!payload) return;
-
-    try {
-        const res = await fetch('/api/highres/partition', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ job_id: hrState.jobId, pfam, ...payload }),
-        });
-        const data = await res.json();
-        const preview = document.getElementById(`partition-preview-${pfam}`);
-        if (data.error) {
-            preview.innerHTML = `<span class="text-muted">${data.error}</span>`;
-        } else {
-            const rows = data.summary.map(s => ({
-                Subclade: s.label,
-                'Leaves': s.n_leaves,
-                'Sample': s.sample.join(', ') + (s.n_leaves > 3 ? ' …' : ''),
-            }));
-            preview.innerHTML = `<div class="label">Preview (${data.summary.length} subclades)</div>` + makeTable(rows, ['Subclade','Leaves','Sample']);
-            preview.dataset.parts = JSON.stringify(data.parts);
-        }
-        showEl(`partition-preview-${pfam}`);
-    } catch (e) {
-        showAlert('build-alert', 'error', e.message);
-    }
-}
-
-async function lockPartition(pfam) {
-    const preview = document.getElementById(`partition-preview-${pfam}`);
-    if (!preview.dataset.parts) {
-        // Auto-preview first
-        await previewPartition(pfam);
-        const p2 = document.getElementById(`partition-preview-${pfam}`);
-        if (!p2.dataset.parts) return;
-        hrState.partitions[pfam] = JSON.parse(p2.dataset.parts);
-    } else {
-        hrState.partitions[pfam] = JSON.parse(preview.dataset.parts);
-    }
-
-    const badge = document.getElementById(`lock-badge-${pfam}`);
-    const n = Object.keys(hrState.partitions[pfam]).length;
-    badge.textContent = `Locked (${n} subclades)`;
-    badge.className = 'badge badge-green';
-    updatePartitionStatus();
-}
-
-function buildPartitionPayload(pfam) {
-    const mode = document.querySelector(`input[name="mode-${pfam}"]:checked`).value;
-    if (mode === 'depth') {
-        const threshold = parseFloat(document.getElementById(`depth-slider-${pfam}`).value);
-        if (threshold <= 0) { alert('Threshold must be > 0'); return null; }
-        return { mode: 'depth', threshold };
-    }
-    if (mode === 'mrca') {
-        const text = document.getElementById(`mrca-text-${pfam}`).value;
-        const groups = [];
-        text.split('\n').forEach(line => {
-            line = line.trim();
-            if (!line || line.startsWith('#')) return;
-            const members = line.split(',').map(s => s.trim()).filter(Boolean);
-            if (members.length) groups.push(members);
-        });
-        if (!groups.length) { alert('Enter at least one group of leaf names.'); return null; }
-        const include_unassigned = document.getElementById(`unassigned-${pfam}`).checked;
-        return { mode: 'mrca', groups, include_unassigned };
-    }
-    if (mode === 'node_path') {
-        const text = document.getElementById(`nodepath-text-${pfam}`).value;
-        const paths = [];
-        text.split('\n').forEach(line => {
-            line = line.trim();
-            if (!line || line.startsWith('#')) return;
-            const parts = line.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
-            if (parts.length) paths.push(parts);
-        });
-        if (!paths.length) { alert('Enter at least one node path.'); return null; }
-        return { mode: 'node_path', paths };
-    }
-    return null;
-}
-
-async function loadNodeList(pfam) {
-    const container = document.getElementById(`nodelist-${pfam}`);
-    if (!container.classList.contains('hidden')) {
-        container.classList.add('hidden');
-        return;
-    }
-    try {
-        const res = await fetch('/api/highres/list-nodes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ job_id: hrState.jobId, pfam }),
-        });
-        const data = await res.json();
-        if (data.nodes && data.nodes.length) {
-            container.innerHTML = makeTable(data.nodes, ['path','n_leaves','sample']);
-        } else {
-            container.innerHTML = '<p class="text-muted">No internal nodes found.</p>';
-        }
-        container.classList.remove('hidden');
-    } catch (e) {
-        showAlert('build-alert', 'error', e.message);
-    }
-}
-
-async function loadTreePreview(pfam) {
-    const container = document.getElementById(`tree-preview-${pfam}`);
-    container.innerHTML = `<p class="text-muted text-sm">Launching ETE4…</p>`;
-    try {
-        const res = await fetch('/api/highres/launch-ete4', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ job_id: hrState.jobId, pfam }),
-        });
-        const data = await res.json();
-        if (data.error) {
-            container.innerHTML = `<span class="text-muted">${data.error}</span>`;
-        } else {
-            container.innerHTML = `
-              <div class="tree-iframe-wrap" style="height:700px;">
-                <iframe style="width:100%;height:700px;border:none;" src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
-              </div>
-              <button class="btn btn-danger btn-sm" style="margin-top:8px;" onclick="stopEte4('${data.ete_key}', '${pfam}')">Stop ETE4</button>
-            `;
-        }
-    } catch (e) {
-        container.innerHTML = `<span class="text-muted">${e.message}</span>`;
-    }
-}
-
-async function stopEte4(eteKey, pfam) {
-    await fetch('/api/highres/stop-ete4', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ete_key: eteKey }),
-    });
-    document.getElementById(`tree-preview-${pfam}`).innerHTML = '<p class="text-muted text-sm">ETE4 stopped.</p>';
-}
-
-function updatePartitionStatus() {
-    const summary = hrState.summary || {};
-    const successful = Object.entries(summary).filter(([, r]) => !r.error);
-    const locked = successful.filter(([pfam]) => hrState.partitions[pfam]);
-    const btn = document.getElementById('compute-profile-btn');
-    const label = document.getElementById('partition-status');
-
-    label.textContent = `${locked.length} / ${successful.length} Pfam(s) locked`;
-
-    if (locked.length > 0) {
-        btn.disabled = false;
-    }
-}
-
-function showStep3() {
-    setStep(3);
-    showEl('step3-section');
-    document.getElementById('step3-section').scrollIntoView({ behavior: 'smooth' });
-}
-
-async function computeProfile() {
-    const locked = Object.entries(hrState.partitions);
-    if (!locked.length) {
-        showAlert('profile-alert', 'error', 'Lock at least one Pfam partition first.');
-        return;
-    }
-
-    clearAlert('profile-alert');
-    hideEl('profile-results');
-    document.getElementById('compute-btn').disabled = true;
-    document.getElementById('compute-btn').textContent = 'Computing…';
-
-    try {
-        const res = await fetch('/api/highres/compute-profile', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                job_id: hrState.jobId,
-                partitions: hrState.partitions,
-                binary: document.getElementById('opt-binary').checked,
-                log_scale: document.getElementById('opt-log').checked,
-                cluster_cols: document.getElementById('opt-cluster').checked,
-            }),
-        });
-        const data = await res.json();
-
-        document.getElementById('compute-btn').disabled = false;
-        document.getElementById('compute-btn').textContent = 'Compute Profile';
-
-        if (data.error) {
-            showAlert('profile-alert', 'error', data.error);
-            return;
-        }
-
-        if (data.heatmap) showImage('heatmap-img', data.heatmap);
-        if (data.matrix) {
-            const cols = data.matrix.length ? Object.keys(data.matrix[0]) : [];
-            document.getElementById('matrix-table').innerHTML = makeTable(data.matrix, cols);
-        }
-
-        if (data.n_missing > 0) {
-            showAlert('missing-warning', 'warning', `${data.n_missing} accession(s) from the input trees were not found in the database for this version.`);
-        }
-
-        document.getElementById('dl-matrix-btn').onclick = () => {
-            downloadText('highres_profile.csv', data.matrix_csv, 'text/csv');
-        };
-        document.getElementById('dl-heatmap-btn').onclick = () => {
-            const img = document.querySelector('#heatmap-img img');
-            if (img) {
-                const a = document.createElement('a');
-                a.href = img.src;
-                a.download = 'highres_profile.png';
-                a.click();
-            }
-        };
-
-        hrState.matrixCsv = data.matrix_csv;
-
-        document.getElementById('dl-fasta-btn').onclick = async () => {
-            const btn = document.getElementById('dl-fasta-btn');
-            btn.disabled = true;
-            btn.textContent = 'Downloading…';
-            try {
-                const res = await fetch('/api/highres/download-fasta', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ job_id: hrState.jobId, partitions: hrState.partitions }),
-                });
-                if (res.ok) {
-                    downloadText('highres_subclades.fasta', await res.text(), 'text/plain');
-                } else {
-                    const err = await res.json();
-                    showAlert('profile-alert', 'error', 'FASTA error: ' + (err.error || 'Unknown'));
-                }
-            } catch (e) {
-                showAlert('profile-alert', 'error', 'FASTA error: ' + e.message);
-            } finally {
-                btn.disabled = false;
-                btn.textContent = 'Sequences FASTA';
-            }
-        };
-
-        showEl('profile-results');
-        document.getElementById('profile-results').scrollIntoView({ behavior: 'smooth' });
-
-    } catch (e) {
-        document.getElementById('compute-btn').disabled = false;
-        document.getElementById('compute-btn').textContent = 'Compute Profile';
-        showAlert('profile-alert', 'error', e.message);
-    }
-}
-
-function resetAll() {
-    if (!confirm('Reset all trees and partitions?')) return;
-    hrState = { jobId: null, summary: null, partitions: {} };
-    hideEl('step2-section');
-    hideEl('step3-section');
-    setStep(1);
-    document.getElementById('build-btn').disabled = false;
-    document.getElementById('build-dot').className = 'status-dot running';
-    document.getElementById('build-status').classList.add('hidden');
-}
-
-// ---- Species (NCBI) static tree ----
-
-async function renderSpeciesTree() {
-    clearAlert('sp-tree-alert');
-    hideEl('sp-tree-result');
-
-    const btn = document.getElementById('sp-tree-btn');
-    btn.disabled    = true;
-    btn.textContent = 'Building NCBI tree…';
-
-    const fd = new FormData();
-    if (hrState.jobId) fd.append('job_id', hrState.jobId);
-    const cmapFile = document.getElementById('sp-colormap').files[0];
-    if (cmapFile) fd.append('colormap', cmapFile);
-
-    try {
-        const res  = await fetch('/api/highres/species-tree', { method: 'POST', body: fd });
-        const data = await res.json();
-
-        btn.disabled    = false;
-        btn.textContent = 'Render Species Tree';
-
-        if (data.error) {
-            showAlert('sp-tree-alert', 'error', data.error);
-            return;
-        }
-
-        document.getElementById('sp-tree-img').innerHTML =
-            `<img src="data:image/png;base64,${data.png}" style="width:100%;display:block;">`;
-        document.getElementById('sp-tree-dl').onclick = () => {
-            const a = document.createElement('a');
-            a.href     = `data:image/png;base64,${data.png}`;
-            a.download = 'species_tree.png';
-            a.click();
-        };
-        showEl('sp-tree-result');
-
-    } catch (e) {
-        btn.disabled    = false;
-        btn.textContent = 'Render Species Tree';
-        showAlert('sp-tree-alert', 'error', e.message);
-    }
-}
-
-// ---- ETE4 interactive profile on NCBI tree ----
-
-async function launchEteMatrixViz() {
-    if (!hrState.matrixCsv) {
-        showAlert('ete-matrix-alert', 'error', 'Compute the profile first (Step 3), then click this button.');
-        return;
-    }
-
-    clearAlert('ete-matrix-alert');
-    hideEl('ete-matrix-viewer');
-
-    const btn  = document.getElementById('ete-matrix-btn');
-    btn.disabled    = true;
-    btn.textContent = 'Launching ETE4…';
-
-    const fd = new FormData();
-    fd.append('matrix_csv', hrState.matrixCsv);
-    const cmapFile = document.getElementById('ete-matrix-colormap').files[0];
-    if (cmapFile) fd.append('colormap', cmapFile);
-
-    try {
-        const res  = await fetch('/api/highres/ete-matrix-viz', { method: 'POST', body: fd });
-        const data = await res.json();
-
-        btn.disabled    = false;
-        btn.textContent = 'Open in ETE4';
-
-        if (data.error) {
-            showAlert('ete-matrix-alert', 'error', data.error);
-            return;
-        }
-
-        document.getElementById('ete-matrix-viewer').innerHTML = `
-          <div class="status-panel" style="margin-bottom:12px;">
-            <div class="status-header">
-              <div class="status-dot done"></div>
-              <span>ETE profile viewer running on port ${data.port} (PID ${data.pid})</span>
-            </div>
-          </div>
-          <div class="tree-iframe-wrap" style="height:720px;">
-            <iframe style="width:100%;height:720px;border:none;"
-              src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
-          </div>`;
-        showEl('ete-matrix-viewer');
-        document.getElementById('ete-matrix-viewer').scrollIntoView({ behavior: 'smooth' });
-
-    } catch (e) {
-        btn.disabled    = false;
-        btn.textContent = 'Open in ETE4';
-        showAlert('ete-matrix-alert', 'error', e.message);
-    }
-}
-
-async function launchEteProfile() {
-    const tblout   = document.getElementById('ete-tblout').files[0];
-    const colormap = document.getElementById('ete-colormap').files[0];
-    const taxids   = document.getElementById('ete-taxids').files[0];
-
-    if (!tblout || !colormap || !taxids) {
-        showAlert('ete-alert', 'error', 'Please upload all three required files (tblout, colormap, taxids).');
-        return;
-    }
-
-    clearAlert('ete-alert');
-    hideEl('ete-viewer');
-
-    const maxVal = document.getElementById('ete-max').value   || '';
-
-    const btn = document.getElementById('ete-launch-btn');
-    btn.disabled    = true;
-    btn.textContent = 'Launching… (building NCBI tree)';
-
-    const fd = new FormData();
-    fd.append('tblout',   tblout);
-    fd.append('colormap', colormap);
-    fd.append('taxids',   taxids);
-    if (maxVal) fd.append('max', maxVal);
-
-    try {
-        const res  = await fetch('/api/ete-profile/launch', { method: 'POST', body: fd });
-        const data = await res.json();
-
-        btn.disabled    = false;
-        btn.textContent = 'Launch ETE Profile';
-
-        if (data.error) {
-            showAlert('ete-alert', 'error', data.error);
-            return;
-        }
-
-        showEl('ete-viewer');
-        document.getElementById('ete-viewer').innerHTML = `
-          <div class="status-panel" style="margin-bottom:12px;">
-            <div class="status-header">
-              <div class="status-dot done"></div>
-              <span>ETE profile running on port ${data.port} &mdash; PID ${data.pid}</span>
-            </div>
-          </div>
-          <div class="tree-iframe-wrap" style="height:720px;">
-            <iframe style="width:100%;height:720px;border:none;"
-              src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
-          </div>
-        `;
-        document.getElementById('ete-viewer').scrollIntoView({ behavior: 'smooth' });
-
-    } catch (e) {
-        btn.disabled    = false;
-        btn.textContent = 'Launch ETE Profile';
-        showAlert('ete-alert', 'error', e.message);
-    }
-}
-</script>
-
-<!-- ================================================================
-     ETE SPECIES TREE PROFILE
-     ================================================================ -->
+<!-- ETE SPECIES TREE PROFILE (standalone) -->
 <hr class="divider" style="margin-top:32px;">
 
 <div class="card" style="margin-top:20px;">
@@ -964,4 +458,913 @@ async function launchEteProfile() {
     </div>
   </div>
 </div>
+
+</div><!-- end #section-hr -->
+
+
+<script>
+// ================================================================
+// Sub-tab switching
+// ================================================================
+function switchSection(which) {
+    document.getElementById('section-pa').style.display = which === 'pa' ? '' : 'none';
+    document.getElementById('section-hr').style.display = which === 'hr' ? '' : 'none';
+    document.querySelectorAll('.section-tab-btn').forEach((btn, i) => {
+        const active = (i === 0 && which === 'pa') || (i === 1 && which === 'hr');
+        btn.style.borderBottomColor = active ? 'var(--primary)' : 'transparent';
+        btn.style.color = active ? 'var(--primary)' : 'var(--text-muted)';
+        btn.style.fontWeight = active ? '600' : '600';
+    });
+}
+
+// ================================================================
+// DOMAIN PRESENCE / ABSENCE  (all IDs prefixed pa-)
+// ================================================================
+let paState = {
+    ver: '2026_01',
+    evalue: null,
+    taxonMap: {},
+    profiles: [],
+    matrixData: null,
+    archRows: [],
+    currentArch: null,
+};
+
+document.getElementById('pa-use-evalue').addEventListener('change', function() {
+    document.getElementById('pa-evalue').classList.toggle('hidden', !this.checked);
+});
+
+// Update cell count when selections change
+['pa-sel-taxon', 'pa-sel-profile'].forEach(id => {
+    document.getElementById(id).addEventListener('change', updateCellCount);
+});
+
+function updateCellCount() {
+    if (!paState.matrixData) return;
+    const taxLabel = document.getElementById('pa-sel-taxon').value;
+    const profile  = document.getElementById('pa-sel-profile').value;
+    const row      = paState.matrixData.find(r => r['Organism'] === taxLabel);
+    const count    = (row && profile) ? (row[profile] || 0) : 0;
+    document.getElementById('pa-cell-count-label').textContent = `Selected cell: ${count} protein(s)`;
+    document.getElementById('pa-drill-btn').disabled = count === 0;
+}
+
+async function buildMatrix() {
+    const pfamInput = document.getElementById('pa-pfam-input').value.trim();
+    if (!pfamInput) {
+        showAlert('pa-alert-area', 'error', 'Enter at least one Pfam name or accession.');
+        return;
+    }
+
+    paState.ver    = document.getElementById('pa-ver').value.trim();
+    paState.evalue = document.getElementById('pa-use-evalue').checked
+        ? parseFloat(document.getElementById('pa-evalue').value) : null;
+
+    const taxRaw  = document.getElementById('pa-taxids').value.trim();
+    const taxFile = document.getElementById('pa-tax-file').files[0];
+    let taxIds    = null;
+
+    if (taxFile) {
+        const text = await taxFile.text();
+        taxIds = parseTaxIds(text.replace(/,/g, '\n'));
+    } else {
+        taxIds = parseTaxIds(taxRaw);
+    }
+
+    const pfamQueries = pfamInput.split(',').map(s => s.trim()).filter(Boolean);
+
+    hideEl('pa-matrix-section');
+    hideEl('pa-drilldown-controls');
+    hideEl('pa-drill-results-section');
+    clearAlert('pa-alert-area');
+    showEl('pa-loading-area');
+    document.getElementById('pa-build-btn').disabled = true;
+    document.getElementById('pa-loading-text').textContent = 'Querying database…';
+
+    try {
+        const res  = await fetch('/api/presence-matrix', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ version: paState.ver, pfam_queries: pfamQueries, tax_ids: taxIds, evalue: paState.evalue }),
+        });
+        const data = await res.json();
+        hideEl('pa-loading-area');
+        document.getElementById('pa-build-btn').disabled = false;
+
+        if (data.error) {
+            showAlert('pa-alert-area', 'error', data.error);
+            return;
+        }
+        if (!data.matrix || data.matrix.length === 0) {
+            showAlert('pa-alert-area', 'info', 'No hits found for these queries and taxa.');
+            return;
+        }
+
+        paState.matrixData = data.matrix;
+        paState.taxonMap   = data.taxon_map;
+        paState.profiles   = data.profiles;
+
+        document.getElementById('pa-matrix-table').innerHTML = makeTable(data.matrix, data.columns);
+        showEl('pa-matrix-section');
+
+        if (data.heatmap) {
+            showImage('pa-heatmap-img', data.heatmap);
+            showEl('pa-heatmap-section');
+        }
+
+        const taxSel  = document.getElementById('pa-sel-taxon');
+        const profSel = document.getElementById('pa-sel-profile');
+        taxSel.innerHTML  = data.matrix.map(r => `<option value="${r['Organism']}">${r['Organism']}</option>`).join('');
+        profSel.innerHTML = data.profiles.map(p => `<option value="${p}">${p}</option>`).join('');
+        showEl('pa-drilldown-controls');
+        updateCellCount();
+
+    } catch (e) {
+        hideEl('pa-loading-area');
+        document.getElementById('pa-build-btn').disabled = false;
+        showAlert('pa-alert-area', 'error', e.message);
+    }
+}
+
+async function doDrillDown() {
+    const taxLabel = document.getElementById('pa-sel-taxon').value;
+    const profile  = document.getElementById('pa-sel-profile').value;
+    const taxonId  = paState.taxonMap[taxLabel];
+
+    hideEl('pa-drill-results-section');
+    showEl('pa-loading-area');
+    document.getElementById('pa-drill-btn').disabled = true;
+    document.getElementById('pa-loading-text').textContent = 'Fetching drill-down data…';
+
+    try {
+        const res  = await fetch('/api/drill-down', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ version: paState.ver, profile, taxon_id: taxonId, evalue: paState.evalue }),
+        });
+        const data = await res.json();
+        hideEl('pa-loading-area');
+        document.getElementById('pa-drill-btn').disabled = false;
+
+        if (data.error) {
+            showAlert('pa-alert-area', 'error', data.error);
+            return;
+        }
+
+        document.getElementById('pa-drill-title').textContent =
+            `Domains co-occurring with ${profile} in ${taxLabel} — ${data.n_proteins} protein(s)`;
+
+        if (data.subprofiles && data.subprofiles.length) {
+            const cols = ['hmm_name','hmm_type','protein_count','coverage','best_evalue','hmm_accession'];
+            const rows = data.subprofiles.map(r => ({
+                ...r,
+                coverage:    r.coverage   != null ? (r.coverage * 100).toFixed(1) + '%' : '',
+                best_evalue: r.best_evalue != null ? r.best_evalue.toExponential(2)    : '',
+            }));
+            document.getElementById('pa-subprofiles-table').innerHTML = makeTable(rows, cols.filter(c => rows[0].hasOwnProperty(c)));
+        } else {
+            document.getElementById('pa-subprofiles-table').innerHTML = '<p class="text-muted">No additional profiles found on these proteins.</p>';
+        }
+
+        paState.archRows = data.architectures || [];
+        if (paState.archRows.length) {
+            const cols = ['architecture','protein_count','coverage','example_accessions'];
+            const rows = paState.archRows.map(r => ({
+                ...r,
+                coverage:            r.coverage           != null ? (r.coverage * 100).toFixed(1) + '%' : '',
+                example_accessions:  Array.isArray(r.example_accessions) ? r.example_accessions.join(', ') : r.example_accessions || '',
+            }));
+            document.getElementById('pa-architectures-table').innerHTML = makeTable(rows, cols.filter(c => rows[0].hasOwnProperty(c)));
+
+            const sel = document.getElementById('pa-sel-arch');
+            sel.innerHTML = paState.archRows.map(r => `<option value="${r.architecture}">${r.architecture}</option>`).join('');
+            showEl('pa-arch-diagram-controls');
+        } else {
+            document.getElementById('pa-architectures-table').innerHTML = '<p class="text-muted">No domain architecture data found.</p>';
+        }
+        hideEl('pa-arch-diagram');
+
+        showEl('pa-drill-results-section');
+        initTabs('#pa-drill-results-section .card .card-body');
+
+    } catch (e) {
+        hideEl('pa-loading-area');
+        document.getElementById('pa-drill-btn').disabled = false;
+        showAlert('pa-alert-area', 'error', e.message);
+    }
+}
+
+async function drawArchDiagram() {
+    const archName = document.getElementById('pa-sel-arch').value;
+    const row      = paState.archRows.find(r => r.architecture === archName);
+    if (!row) return;
+
+    const accs = Array.isArray(row.example_accessions) ? row.example_accessions : [];
+    if (!accs.length) {
+        showAlert('pa-alert-area', 'info', 'No example accessions for this pattern.');
+        return;
+    }
+
+    hideEl('pa-arch-diagram');
+
+    try {
+        const res  = await fetch('/api/draw-architecture', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ version: paState.ver, accessions: accs, evalue: paState.evalue, title: `Architecture: ${archName}` }),
+        });
+        const data = await res.json();
+        if (data.png) {
+            showImage('pa-arch-diagram', data.png);
+        } else {
+            showAlert('pa-alert-area', 'error', data.error || 'Could not render diagram.');
+        }
+    } catch (e) {
+        showAlert('pa-alert-area', 'error', e.message);
+    }
+}
+
+function downloadMatrix() {
+    if (!paState.matrixData) return;
+    const cols  = ['Organism', ...paState.profiles];
+    const lines = [cols.join(',')];
+    paState.matrixData.forEach(row => {
+        lines.push(cols.map(c => JSON.stringify(row[c] ?? '')).join(','));
+    });
+    downloadText('presence_absence_matrix.csv', lines.join('\n'), 'text/csv');
+}
+
+function downloadHeatmap() {
+    const img = document.querySelector('#pa-heatmap-img img');
+    if (!img) return;
+    const a = document.createElement('a');
+    a.href     = img.src;
+    a.download = 'presence_absence_heatmap.png';
+    a.click();
+}
+
+
+// ================================================================
+// HIGH RESOLUTION PHYLOGENETIC PROFILE  (unchanged from highres.html)
+// ================================================================
+let hrState = {
+    jobId:      null,
+    summary:    null,
+    partitions: {},
+    matrixCsv:  null,
+};
+
+let pfamIframes = {};
+
+function setStep(n) {
+    [1,2,3].forEach(i => {
+        const s = document.getElementById(`step${i}`);
+        if (i < n)      s.className = 'step done';
+        else if (i === n) s.className = 'step active';
+        else              s.className = 'step';
+    });
+}
+
+async function buildTrees() {
+    const pfamText = document.getElementById('pfam-text').value.trim();
+    if (!pfamText) {
+        showAlert('build-alert', 'error', 'Enter at least one Pfam ID.');
+        return;
+    }
+
+    hrState.partitions = {};
+    hrState.jobId      = null;
+    hideEl('step2-section');
+    hideEl('step3-section');
+    clearAlert('build-alert');
+    setStep(1);
+
+    const fd = new FormData();
+    fd.append('pfams',       pfamText);
+    fd.append('version',     document.getElementById('ver').value.trim());
+    fd.append('output_root', document.getElementById('output-root').value.trim());
+    fd.append('aln',         document.getElementById('aln').value);
+    fd.append('ml',          document.getElementById('ml').value);
+    fd.append('gt',          document.getElementById('gt').value);
+    fd.append('cpu',         document.getElementById('cpu').value);
+
+    const evalue = document.getElementById('evalue').value.trim();
+    if (evalue) fd.append('evalue', evalue);
+
+    const taxFile = document.getElementById('tax-file').files[0];
+    if (taxFile) fd.append('tax_file', taxFile);
+    else         fd.append('taxids', document.getElementById('taxids').value.trim());
+
+    const exclFile = document.getElementById('excl-file').files[0];
+    if (exclFile) fd.append('excl_file', exclFile);
+    else          fd.append('exclude_taxids', document.getElementById('excl-taxids').value.trim());
+
+    document.getElementById('build-btn').disabled = true;
+    showEl('build-status');
+    document.getElementById('build-dot').className        = 'status-dot running';
+    document.getElementById('build-status-text').textContent = 'Building trees…';
+    document.getElementById('build-log').textContent      = '';
+
+    try {
+        const res  = await fetch('/api/highres/build-trees', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.error) {
+            showJobError(data.error);
+            return;
+        }
+        hrState.jobId = data.job_id;
+        pollBuildStatus();
+    } catch (e) {
+        showJobError(e.message);
+    }
+}
+
+let pollTimer = null;
+function pollBuildStatus() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+        if (!hrState.jobId) return;
+        try {
+            const res  = await fetch(`/api/highres/job/${hrState.jobId}`);
+            const data = await res.json();
+
+            if (data.log && data.log.length) {
+                document.getElementById('build-log').textContent = data.log.join('\n');
+            }
+
+            if (data.status === 'done') {
+                clearInterval(pollTimer);
+                document.getElementById('build-btn').disabled       = false;
+                document.getElementById('build-dot').className      = 'status-dot done';
+                document.getElementById('build-status-text').textContent = 'Done.';
+                hrState.summary = data.summary;
+                showStep2(data.summary);
+            } else if (data.status === 'error') {
+                clearInterval(pollTimer);
+                showJobError(data.error);
+            }
+        } catch (e) {
+            clearInterval(pollTimer);
+            showJobError(e.message);
+        }
+    }, 3000);
+}
+
+function showJobError(msg) {
+    document.getElementById('build-btn').disabled       = false;
+    document.getElementById('build-dot').className      = 'status-dot error';
+    document.getElementById('build-status-text').textContent = 'Error';
+    showAlert('build-alert', 'error', msg);
+}
+
+function showStep2(summary) {
+    setStep(2);
+
+    const rows = Object.entries(summary).map(([pfam, r]) => ({
+        Pfam:       pfam,
+        Status:     r.error ? `ERROR: ${r.error.slice(0,60)}` : 'OK',
+        Cached:     r.cached ? 'yes' : 'no',
+        Leaves:     r.n_leaves,
+        'Max depth': r.max_depth.toFixed(4),
+    }));
+    document.getElementById('summary-table').innerHTML = makeTable(rows, ['Pfam','Status','Cached','Leaves','Max depth']);
+
+    const container = document.getElementById('pfam-blocks');
+    container.innerHTML = '';
+    pfamIframes = {};
+
+    Object.entries(summary).forEach(([pfam, r]) => {
+        if (r.error) return;
+        container.appendChild(makePfamBlock(pfam, r));
+    });
+
+    showEl('step2-section');
+    updatePartitionStatus();
+}
+
+function makePfamBlock(pfam, r) {
+    const div    = document.createElement('div');
+    div.className = 'pfam-block';
+    div.style.marginBottom = '16px';
+    div.id       = `pfam-block-${pfam}`;
+
+    const locked = hrState.partitions[pfam];
+
+    div.innerHTML = `
+      <div class="pfam-block-header">
+        <span>${pfam}</span>
+        <span class="badge ${locked ? 'badge-green' : 'badge-gray'}" id="lock-badge-${pfam}">
+          ${locked ? `Locked (${Object.keys(locked).length} subclades)` : 'Not locked'}
+        </span>
+        <span class="text-muted text-sm" style="margin-left:auto;">${r.n_leaves} leaves · max depth ${r.max_depth.toFixed(4)}</span>
+      </div>
+      <div class="pfam-block-body">
+
+        <div class="form-group" style="margin-bottom:12px;">
+          <label>Partition mode</label>
+          <div class="radio-group">
+            <label class="radio-item"><input type="radio" name="mode-${pfam}" value="depth" checked onchange="onModeChange('${pfam}')"> Depth slider</label>
+            <label class="radio-item"><input type="radio" name="mode-${pfam}" value="mrca" onchange="onModeChange('${pfam}')"> Manual MRCA</label>
+            <label class="radio-item"><input type="radio" name="mode-${pfam}" value="node_path" onchange="onModeChange('${pfam}')"> Node path</label>
+            <label class="radio-item"><input type="radio" name="mode-${pfam}" value="auto_duplication" onchange="onModeChange('${pfam}')"> Auto duplication</label>
+          </div>
+        </div>
+
+        <div id="depth-ctrl-${pfam}">
+          <div class="form-group">
+            <label>Cut depth (0 – ${r.max_depth.toFixed(4)})</label>
+            <input type="range" id="depth-slider-${pfam}"
+              min="0" max="${r.max_depth * 1.01}"
+              step="${r.max_depth / 200}"
+              value="${(r.max_depth * 0.5).toFixed(4)}"
+              oninput="document.getElementById('depth-val-${pfam}').textContent = parseFloat(this.value).toFixed(4)">
+            <div class="slider-val" id="depth-val-${pfam}">${(r.max_depth * 0.5).toFixed(4)}</div>
+          </div>
+        </div>
+
+        <div id="mrca-ctrl-${pfam}" class="hidden">
+          <div class="form-group">
+            <label>Leaf-name groups (one group per line, comma-separated)</label>
+            <textarea id="mrca-text-${pfam}" rows="4" placeholder="# Each line defines one subclade&#10;${r.leaves.slice(0,2).join(', ')}"></textarea>
+          </div>
+          <label class="checkbox-item" style="margin-top:4px;">
+            <input type="checkbox" id="unassigned-${pfam}" checked>
+            Include 'unassigned' bucket
+          </label>
+        </div>
+
+        <div id="nodepath-ctrl-${pfam}" class="hidden">
+          <div style="margin-bottom:8px;">
+            <button class="btn btn-secondary btn-sm" onclick="loadNodeList('${pfam}')">Show node list</button>
+          </div>
+          <div id="nodelist-${pfam}" class="hidden" style="margin-bottom:10px;max-height:180px;overflow-y:auto;"></div>
+          <div class="form-group">
+            <label>Node paths (one per line, comma-separated indices)</label>
+            <textarea id="nodepath-text-${pfam}" rows="4" placeholder="# e.g.&#10;0,1&#10;1,0"></textarea>
+          </div>
+        </div>
+
+        <div id="autodup-ctrl-${pfam}" class="hidden">
+          <div class="form-group">
+            <label>Taxonomic level (NCBI taxid)</label>
+            <input type="text" id="autodup-taxon-${pfam}"
+              placeholder="e.g. 33213 (Bilateria), 9443 (Primates)">
+            <span class="hint">Duplications are detected when the same species from this group appear on bot sides of a split.</span>
+          </div>
+        </div>
+
+        <div id="partition-preview-${pfam}" class="hidden partition-preview"></div>
+
+        <div class="flex gap-8" style="margin-top:12px;">
+          <button class="btn btn-secondary btn-sm" onclick="previewPartition('${pfam}')">Preview</button>
+          <button class="btn btn-primary btn-sm" id="lock-btn-${pfam}" onclick="lockPartition('${pfam}')">Use this partition</button>
+        </div>
+
+        <details style="margin-top:14px;" class="expander" style="border:none;background:transparent;">
+          <summary style="padding:8px 0;font-size:12px;">Show tree preview</summary>
+          <div class="expander-body" style="padding:10px 0 0;">
+            <div class="radio-group" style="margin-bottom:10px;">
+              <label class="radio-item"><input type="radio" name="tree-view-${pfam}" value="ete4" checked> ETE4 server</label>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadTreePreview('${pfam}')">Load tree</button>
+            <div id="tree-preview-${pfam}" style="margin-top:10px;"></div>
+          </div>
+        </details>
+
+      </div>
+    `;
+
+    return div;
+}
+
+function onModeChange(pfam) {
+    const mode = document.querySelector(`input[name="mode-${pfam}"]:checked`).value;
+    document.getElementById(`depth-ctrl-${pfam}`).classList.toggle('hidden', mode !== 'depth');
+    document.getElementById(`mrca-ctrl-${pfam}`).classList.toggle('hidden', mode !== 'mrca');
+    document.getElementById(`nodepath-ctrl-${pfam}`).classList.toggle('hidden', mode !== 'node_path');
+    document.getElementById(`autodup-ctrl-${pfam}`).classList.toggle('hidden', mode !== 'auto_duplication');
+}
+
+async function previewPartition(pfam) {
+    const payload = buildPartitionPayload(pfam);
+    if (!payload) return;
+
+    try {
+        const res  = await fetch('/api/highres/partition', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: hrState.jobId, pfam, ...payload }),
+        });
+        const data = await res.json();
+        const preview = document.getElementById(`partition-preview-${pfam}`);
+        if (data.error) {
+            preview.innerHTML = `<span class="text-muted">${data.error}</span>`;
+        } else {
+            const rows = data.summary.map(s => ({
+                Subclade: s.label,
+                'Leaves': s.n_leaves,
+                'Sample': s.sample.join(', ') + (s.n_leaves > 3 ? ' …' : ''),
+            }));
+            preview.innerHTML = `<div class="label">Preview (${data.summary.length} subclades)</div>` + makeTable(rows, ['Subclade','Leaves','Sample']);
+            preview.dataset.parts = JSON.stringify(data.parts);
+        }
+        showEl(`partition-preview-${pfam}`);
+    } catch (e) {
+        showAlert('build-alert', 'error', e.message);
+    }
+}
+
+async function lockPartition(pfam) {
+    const preview = document.getElementById(`partition-preview-${pfam}`);
+    if (!preview.dataset.parts) {
+        await previewPartition(pfam);
+        const p2 = document.getElementById(`partition-preview-${pfam}`);
+        if (!p2.dataset.parts) return;
+        hrState.partitions[pfam] = JSON.parse(p2.dataset.parts);
+    } else {
+        hrState.partitions[pfam] = JSON.parse(preview.dataset.parts);
+    }
+
+    const badge = document.getElementById(`lock-badge-${pfam}`);
+    const n     = Object.keys(hrState.partitions[pfam]).length;
+    badge.textContent = `Locked (${n} subclades)`;
+    badge.className   = 'badge badge-green';
+    updatePartitionStatus();
+}
+
+function buildPartitionPayload(pfam) {
+    const mode = document.querySelector(`input[name="mode-${pfam}"]:checked`).value;
+    if (mode === 'depth') {
+        const threshold = parseFloat(document.getElementById(`depth-slider-${pfam}`).value);
+        if (threshold <= 0) { alert('Threshold must be > 0'); return null; }
+        return { mode: 'depth', threshold };
+    }
+    if (mode === 'mrca') {
+        const text   = document.getElementById(`mrca-text-${pfam}`).value;
+        const groups = [];
+        text.split('\n').forEach(line => {
+            line = line.trim();
+            if (!line || line.startsWith('#')) return;
+            const members = line.split(',').map(s => s.trim()).filter(Boolean);
+            if (members.length) groups.push(members);
+        });
+        if (!groups.length) { alert('Enter at least one group of leaf names.'); return null; }
+        const include_unassigned = document.getElementById(`unassigned-${pfam}`).checked;
+        return { mode: 'mrca', groups, include_unassigned };
+    }
+    if (mode === 'node_path') {
+        const text  = document.getElementById(`nodepath-text-${pfam}`).value;
+        const paths = [];
+        text.split('\n').forEach(line => {
+            line = line.trim();
+            if (!line || line.startsWith('#')) return;
+            const parts = line.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+            if (parts.length) paths.push(parts);
+        });
+        if (!paths.length) { alert('Enter at least one node path.'); return null; }
+        return { mode: 'node_path', paths };
+    }
+
+    if (mode === 'auto_duplication') {
+        const taxon_level = document.getElementById(`autodup-taxon-${pfam}`).value.trim();
+        if (!taxon_level) { alert('Enter a taxon NCBI taxid.'); return null; }
+        return { mode: 'auto_duplication', taxon_level };
+}
+    return null;
+}
+
+async function loadNodeList(pfam) {
+    const container = document.getElementById(`nodelist-${pfam}`);
+    if (!container.classList.contains('hidden')) {
+        container.classList.add('hidden');
+        return;
+    }
+    try {
+        const res  = await fetch('/api/highres/list-nodes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: hrState.jobId, pfam }),
+        });
+        const data = await res.json();
+        if (data.nodes && data.nodes.length) {
+            container.innerHTML = makeTable(data.nodes, ['path','n_leaves','sample']);
+        } else {
+            container.innerHTML = '<p class="text-muted">No internal nodes found.</p>';
+        }
+        container.classList.remove('hidden');
+    } catch (e) {
+        showAlert('build-alert', 'error', e.message);
+    }
+}
+
+async function loadTreePreview(pfam) {
+    const container  = document.getElementById(`tree-preview-${pfam}`);
+    container.innerHTML = `<p class="text-muted text-sm">Launching ETE4…</p>`;
+    try {
+        const res  = await fetch('/api/highres/launch-ete4', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: hrState.jobId, pfam }),
+        });
+        const data = await res.json();
+        if (data.error) {
+            container.innerHTML = `<span class="text-muted">${data.error}</span>`;
+        } else {
+            container.innerHTML = `
+              <div class="tree-iframe-wrap" style="height:700px;">
+                <iframe style="width:100%;height:700px;border:none;" src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
+              </div>
+              <button class="btn btn-danger btn-sm" style="margin-top:8px;" onclick="stopEte4('${data.ete_key}', '${pfam}')">Stop ETE4</button>
+            `;
+        }
+    } catch (e) {
+        container.innerHTML = `<span class="text-muted">${e.message}</span>`;
+    }
+}
+
+async function stopEte4(eteKey, pfam) {
+    await fetch('/api/highres/stop-ete4', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ete_key: eteKey }),
+    });
+    document.getElementById(`tree-preview-${pfam}`).innerHTML = '<p class="text-muted text-sm">ETE4 stopped.</p>';
+}
+
+function updatePartitionStatus() {
+    const summary    = hrState.summary || {};
+    const successful = Object.entries(summary).filter(([, r]) => !r.error);
+    const locked     = successful.filter(([pfam]) => hrState.partitions[pfam]);
+    const btn        = document.getElementById('compute-profile-btn');
+    const label      = document.getElementById('partition-status');
+
+    label.textContent = `${locked.length} / ${successful.length} Pfam(s) locked`;
+
+    if (locked.length > 0) {
+        btn.disabled = false;
+    }
+}
+
+function showStep3() {
+    setStep(3);
+    showEl('step3-section');
+    document.getElementById('step3-section').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function computeProfile() {
+    const locked = Object.entries(hrState.partitions);
+    if (!locked.length) {
+        showAlert('profile-alert', 'error', 'Lock at least one Pfam partition first.');
+        return;
+    }
+
+    clearAlert('profile-alert');
+    hideEl('profile-results');
+    document.getElementById('compute-btn').disabled    = true;
+    document.getElementById('compute-btn').textContent = 'Computing…';
+
+    try {
+        const res  = await fetch('/api/highres/compute-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                job_id:       hrState.jobId,
+                partitions:   hrState.partitions,
+                binary:       document.getElementById('opt-binary').checked,
+                log_scale:    document.getElementById('opt-log').checked,
+                cluster_cols: document.getElementById('opt-cluster').checked,
+            }),
+        });
+        const data = await res.json();
+
+        document.getElementById('compute-btn').disabled    = false;
+        document.getElementById('compute-btn').textContent = 'Compute Profile';
+
+        if (data.error) {
+            showAlert('profile-alert', 'error', data.error);
+            return;
+        }
+
+        if (data.heatmap) showImage('heatmap-img', data.heatmap);
+        if (data.matrix) {
+            const cols = data.matrix.length ? Object.keys(data.matrix[0]) : [];
+            document.getElementById('matrix-table').innerHTML = makeTable(data.matrix, cols);
+        }
+
+        if (data.n_missing > 0) {
+            showAlert('missing-warning', 'warning', `${data.n_missing} accession(s) from the input trees were not found in the database for this version.`);
+        }
+
+        document.getElementById('dl-matrix-btn').onclick = () => {
+            downloadText('highres_profile.csv', data.matrix_csv, 'text/csv');
+        };
+        document.getElementById('dl-heatmap-btn').onclick = () => {
+            const img = document.querySelector('#heatmap-img img');
+            if (img) {
+                const a = document.createElement('a');
+                a.href     = img.src;
+                a.download = 'highres_profile.png';
+                a.click();
+            }
+        };
+
+        hrState.matrixCsv = data.matrix_csv;
+
+        document.getElementById('dl-fasta-btn').onclick = async () => {
+            const btn = document.getElementById('dl-fasta-btn');
+            btn.disabled    = true;
+            btn.textContent = 'Downloading…';
+            try {
+                const res = await fetch('/api/highres/download-fasta', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_id: hrState.jobId, partitions: hrState.partitions }),
+                });
+                if (res.ok) {
+                    downloadText('highres_subclades.fasta', await res.text(), 'text/plain');
+                } else {
+                    const err = await res.json();
+                    showAlert('profile-alert', 'error', 'FASTA error: ' + (err.error || 'Unknown'));
+                }
+            } catch (e) {
+                showAlert('profile-alert', 'error', 'FASTA error: ' + e.message);
+            } finally {
+                btn.disabled    = false;
+                btn.textContent = 'Sequences FASTA';
+            }
+        };
+
+        showEl('profile-results');
+        document.getElementById('profile-results').scrollIntoView({ behavior: 'smooth' });
+
+    } catch (e) {
+        document.getElementById('compute-btn').disabled    = false;
+        document.getElementById('compute-btn').textContent = 'Compute Profile';
+        showAlert('profile-alert', 'error', e.message);
+    }
+}
+
+function resetAll() {
+    if (!confirm('Reset all trees and partitions?')) return;
+    hrState = { jobId: null, summary: null, partitions: {} };
+    hideEl('step2-section');
+    hideEl('step3-section');
+    setStep(1);
+    document.getElementById('build-btn').disabled = false;
+    document.getElementById('build-dot').className = 'status-dot running';
+    document.getElementById('build-status').classList.add('hidden');
+}
+
+async function renderSpeciesTree() {
+    clearAlert('sp-tree-alert');
+    hideEl('sp-tree-result');
+
+    const btn       = document.getElementById('sp-tree-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Building NCBI tree…';
+
+    const fd = new FormData();
+    if (hrState.jobId) fd.append('job_id', hrState.jobId);
+    const cmapFile = document.getElementById('sp-colormap').files[0];
+    if (cmapFile) fd.append('colormap', cmapFile);
+
+    try {
+        const res  = await fetch('/api/highres/species-tree', { method: 'POST', body: fd });
+        const data = await res.json();
+
+        btn.disabled    = false;
+        btn.textContent = 'Render Species Tree';
+
+        if (data.error) {
+            showAlert('sp-tree-alert', 'error', data.error);
+            return;
+        }
+
+        document.getElementById('sp-tree-img').innerHTML =
+            `<img src="data:image/png;base64,${data.png}" style="width:100%;display:block;">`;
+        document.getElementById('sp-tree-dl').onclick = () => {
+            const a    = document.createElement('a');
+            a.href     = `data:image/png;base64,${data.png}`;
+            a.download = 'species_tree.png';
+            a.click();
+        };
+        showEl('sp-tree-result');
+
+    } catch (e) {
+        btn.disabled    = false;
+        btn.textContent = 'Render Species Tree';
+        showAlert('sp-tree-alert', 'error', e.message);
+    }
+}
+
+async function launchEteMatrixViz() {
+    if (!hrState.matrixCsv) {
+        showAlert('ete-matrix-alert', 'error', 'Compute the profile first (Step 3), then click this button.');
+        return;
+    }
+
+    clearAlert('ete-matrix-alert');
+    hideEl('ete-matrix-viewer');
+
+    const btn       = document.getElementById('ete-matrix-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Launching ETE4…';
+
+    const fd = new FormData();
+    fd.append('matrix_csv', hrState.matrixCsv);
+    const cmapFile = document.getElementById('ete-matrix-colormap').files[0];
+    if (cmapFile) fd.append('colormap', cmapFile);
+
+    try {
+        const res  = await fetch('/api/highres/ete-matrix-viz', { method: 'POST', body: fd });
+        const data = await res.json();
+
+        btn.disabled    = false;
+        btn.textContent = 'Open in ETE4';
+
+        if (data.error) {
+            showAlert('ete-matrix-alert', 'error', data.error);
+            return;
+        }
+
+        document.getElementById('ete-matrix-viewer').innerHTML = `
+          <div class="status-panel" style="margin-bottom:12px;">
+            <div class="status-header">
+              <div class="status-dot done"></div>
+              <span>ETE profile viewer running on port ${data.port} (PID ${data.pid})</span>
+            </div>
+          </div>
+          <div class="tree-iframe-wrap" style="height:720px;">
+            <iframe style="width:100%;height:720px;border:none;"
+              src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
+          </div>`;
+        showEl('ete-matrix-viewer');
+        document.getElementById('ete-matrix-viewer').scrollIntoView({ behavior: 'smooth' });
+
+    } catch (e) {
+        btn.disabled    = false;
+        btn.textContent = 'Open in ETE4';
+        showAlert('ete-matrix-alert', 'error', e.message);
+    }
+}
+
+async function launchEteProfile() {
+    const tblout   = document.getElementById('ete-tblout').files[0];
+    const colormap = document.getElementById('ete-colormap').files[0];
+    const taxids   = document.getElementById('ete-taxids').files[0];
+
+    if (!tblout || !colormap || !taxids) {
+        showAlert('ete-alert', 'error', 'Please upload all three required files (tblout, colormap, taxids).');
+        return;
+    }
+
+    clearAlert('ete-alert');
+    hideEl('ete-viewer');
+
+    const maxVal = document.getElementById('ete-max').value || '';
+
+    const btn       = document.getElementById('ete-launch-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Launching… (building NCBI tree)';
+
+    const fd = new FormData();
+    fd.append('tblout',   tblout);
+    fd.append('colormap', colormap);
+    fd.append('taxids',   taxids);
+    if (maxVal) fd.append('max', maxVal);
+
+    try {
+        const res  = await fetch('/api/ete-profile/launch', { method: 'POST', body: fd });
+        const data = await res.json();
+
+        btn.disabled    = false;
+        btn.textContent = 'Launch ETE Profile';
+
+        if (data.error) {
+            showAlert('ete-alert', 'error', data.error);
+            return;
+        }
+
+        showEl('ete-viewer');
+        document.getElementById('ete-viewer').innerHTML = `
+          <div class="status-panel" style="margin-bottom:12px;">
+            <div class="status-header">
+              <div class="status-dot done"></div>
+              <span>ETE profile running on port ${data.port} &mdash; PID ${data.pid}</span>
+            </div>
+          </div>
+          <div class="tree-iframe-wrap" style="height:720px;">
+            <iframe style="width:100%;height:720px;border:none;"
+              src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
+          </div>
+        `;
+        document.getElementById('ete-viewer').scrollIntoView({ behavior: 'smooth' });
+
+    } catch (e) {
+        btn.disabled    = false;
+        btn.textContent = 'Launch ETE Profile';
+        showAlert('ete-alert', 'error', e.message);
+    }
+}
+</script>
 {% endblock %}

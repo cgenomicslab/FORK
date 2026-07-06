@@ -999,6 +999,13 @@ if __name__ == "__main__":
 
                 attach_paths(t)
 
+                # ETE4 SmartView raises "Cannot draw tree with width 0" when
+                # any branch has dist=0 (e.g. polytomy-resolution nodes added
+                # by tree_builder.py). Replace zeros with a tiny value.
+                for _n in t.traverse():
+                    if _n.up is not None and (not _n.dist or _n.dist <= 0):
+                        _n.dist = 1e-6
+
                 t.explore(
                     layouts=[
                         BASIC_LAYOUT,
@@ -1010,6 +1017,7 @@ if __name__ == "__main__":
                     ],
                     keep_server=True,
                     quiet=True,
+                    open_browser=False,
                     port=args["port"],
                     host="0.0.0.0",
                     show_leaf_name=True,

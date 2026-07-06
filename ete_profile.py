@@ -138,34 +138,47 @@ my_tree_style = {
     "shape": "rectangular",
     "aligned-leaves": True,
     "show-popup-props": None,
-    "hz-line": {"stroke-width": 2, "stroke": "black"},
-    "vt-line": {"stroke-width": 2, "stroke": "black"},
+    # No hz-line/vt-line here — branch_col handles all branch styling per node
 }
 
-# modify branch colour based on taxonomic grouping
-priority = [
-    "9606",  # Human
-    "936053",  # Rhizopus delemar
-    "4827",  # Mucorales
-    "4751",  # Fungi
-    "33090",  # Plants
-    "33213",  # Bilateria
-]
+# Pre-assign branch_color using ncbi.get_lineage() — direct DB query.
+# Walk each node's full NCBI lineage; first matching colormap entry wins.
+priority = list(taxid2color.keys())
+
+leaf_color = {}
+for _tid_str in taxids:
+    try:
+        _lin = ncbi.get_lineage(int(_tid_str)) or []
+    except Exception:
+        continue
+    for _p in priority:
+        try:
+            if int(_p) in _lin:
+                leaf_color[_tid_str] = taxid2color[_p]
+                break
+        except ValueError:
+            continue
+
+for _node in tree.traverse():
+    if _node.is_leaf:
+        _tid_str = str(_node.props.get("taxid", ""))
+        _col = leaf_color.get(_tid_str)
+    else:
+        _cols = {
+            leaf_color.get(str(_l.props.get("taxid", ""))) for _l in _node.leaves()
+        }
+        _cols.discard(None)
+        _col = next(iter(_cols)) if len(_cols) == 1 else None
+    if _col:
+        _node.add_prop("branch_color", _col)
 
 
 def branch_col(node):
-
-    tax_id = int(node.props["taxid"])
-    lineage = tax2lineages[tax_id]
-
-    for taxid in priority:
-
-        if int(taxid) in lineage:
-
-            return {
-                "hz-line": {"stroke": taxid2color[taxid]},
-                "vt-line": {"stroke": taxid2color[taxid]},
-            }
+    col = node.props.get("branch_color", "black")
+    return {
+        "hz-line": {"stroke": col},
+        "vt-line": {"stroke": col},
+    }
 
 
 # display their scientific names

@@ -100,19 +100,81 @@ my_tree_style = {
     "shape": "rectangular",
     "aligned-leaves": True,
     "show-popup-props": None,
-    "hz-line": {"stroke-width": 2, "stroke": "#333333"},
-    "vt-line": {"stroke-width": 2, "stroke": "#333333"},
+    # No hz-line/vt-line here — branch_col handles all branch styling per node
 }
+
+# ── Pre-assign branch_color prop ───────────
+# ── Branch colour pre-computation (same pattern as tree_from_db.py) ──────────
+
+_PALETTE = [
+    "#e6194B",
+    "#3cb44b",
+    "#ffe119",
+    "#4363d8",
+    "#f58231",
+    "#911eb4",
+    "#42d4f4",
+    "#f032e6",
+    "#bfef45",
+    "#469990",
+    "#dcbeff",
+    "#9A6324",
+    "#800000",
+    "#aaffc3",
+    "#808000",
+    "#ffd8b1",
+    "#000075",
+    "#a9a9a9",
+]
+
+if taxid2color:
+    # User provided a colormap: group-level taxids → color.
+    # Walk each node's NCBI lineage; first matching colormap entry wins.
+    # Put more-specific groups before broader ones in your colormap file.
+    priority = list(taxid2color.keys())
+    leaf_color = {}
+    for _tid_str in taxids:
+        try:
+            _lin = ncbi.get_lineage(int(_tid_str)) or []
+        except Exception:
+            continue
+        for _p in priority:
+            try:
+                if int(_p) in _lin:
+                    leaf_color[_tid_str] = taxid2color[_p]
+                    break
+            except ValueError:
+                continue
+else:
+    # No colormap: auto-assign one distinct color per leaf taxid (like tree_from_db.py)
+    leaf_color = {
+        tid: _PALETTE[i % len(_PALETTE)] for i, tid in enumerate(sorted(taxids))
+    }
+
+# Assign branch_color to every node; internal nodes get the shared color only
+# when all their leaf descendants belong to the same color group.
+for _node in tree.traverse():
+    if _node.is_leaf:
+        _tid_str = str(_node.props.get("taxid", ""))
+        _col = leaf_color.get(_tid_str)
+    else:
+        _cols = {
+            leaf_color.get(str(_l.props.get("taxid", ""))) for _l in _node.leaves()
+        }
+        _cols.discard(None)
+        _col = next(iter(_cols)) if len(_cols) == 1 else None
+    if _col:
+        _node.add_prop("branch_color", _col)
 
 
 def branch_col(node):
-    taxid = str(node.props.get("taxid", ""))
-    if taxid in taxid2color:
-        c = taxid2color[taxid]
-        return {
-            "hz-line": {"stroke": c, "stroke-width": 4},
-            "vt-line": {"stroke": c, "stroke-width": 4},
-        }
+    # Always return a style — same pattern as tree_from_db.py.
+    # Returning None lets the tree-level style override the per-node color.
+    col = node.props.get("branch_color", "#333333")
+    return {
+        "hz-line": {"stroke": col, "stroke-width": 3},
+        "vt-line": {"stroke": col, "stroke-width": 3},
+    }
 
 
 def name_layout(node):

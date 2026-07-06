@@ -288,6 +288,92 @@ def list_internal_nodes(tree, max_nodes=300):
 
 
 # -----------------------------------------------------------------------------
+#     Partition the tree by duplication events based on taxonomic level
+# -----------------------------------------------------------------------------
+def _leaf_taxid(leaf_name):
+    """Extract the NCBI taxid from a leaf name. Leaf names are 'taxid.accession'"""
+
+    return leaf_name.split(".")[0]
+
+
+def _target_species_set(tree, taxon_taxid, ncbi):
+    """Return the set of taxids present as leaves in 'tree' whose NCBI lineage contains
+    'taxon_taxid'. This way is defined which leaves belong to the taxonomic group we are
+    partitioning within.
+    """
+    taxon_taxid = str(taxon_taxid)
+    target = set()
+    lineage_cache = {}
+
+    for leaf in tree.leaves():
+        taxid = _leaf_taxid(leaf.name)
+        if taxid not in lineage_cache:
+            try:
+                lineage_cache[taxid] = {str(t) for t in (ncbi.get_lineage(int(taxid)) or [])}
+            except Exception as e:
+                print(f"[partition_by_duplication] lineage lookup failed for taxid={taxid!r}: {e}")
+                lineage_cache[taxid] = set()
+        if taxon_taxid in lineage_cache[taxid]:
+            target.add(taxid)
+    return target
+
+
+def partition_by_duplication(tree, taxon_taxid, ncbi):
+    target_species = _target_species_set(tree, taxon_taxid, ncbi)
+    if not target_species:
+        return {}
+    # node -> set of target species found under that node
+    node_species = {}
+    duplication_nodes = []
+
+    for node in tree.traverse(
+        "postorder"
+    ):  # leaves first, root last -- walking the tree bottom-up
+        # we process the children before parents, so by the time we reach an internal node, we know what's below each of its children
+        if node.is_leaf:
+            taxid = _leaf_taxid(node.name)
+            node_species[node] = {taxid} if taxid in target_species else set()
+            continue
+
+        child_sets = [node_species[c] for c in node.children]
+        node_species[node] = set().union(*child_sets) if child_sets else set()
+
+        is_duplication = False
+        for i in range(len(child_sets)):
+            for j in range(i + 1, len(child_sets)):
+                if child_sets[i] & child_sets[j]:
+                    is_duplication = True
+                    break
+            if is_duplication:
+                break
+        if is_duplication:
+            duplication_nodes.append(node)
+    if not duplication_nodes:
+        return {}
+
+    # Only split at the outermost duplication nodes.
+    # Walk preorder (root → leaves); once a subtree is claimed by a duplication
+    # node, skip any nested duplication nodes inside it to avoid overlapping subclades.
+    duplication_set = set(id(n) for n in duplication_nodes)
+    subclade_roots = []
+    claimed = set()
+
+    for node in tree.traverse("preorder"):
+        if id(node) in claimed:
+            continue
+        if id(node) in duplication_set:
+            for child in node.children:
+                subclade_roots.append(child)
+                for desc in child.traverse():
+                    claimed.add(id(desc))
+
+    if not subclade_roots:
+        return {}
+
+    return _ladderize_label(tree, subclade_roots)
+
+
+# -----------------------------------------------------------------------------
 # To test, run: python subclade_partition.py
 # -----------------------------------------------------------------------------
 
