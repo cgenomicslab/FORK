@@ -14,7 +14,7 @@ Three main analysis modules, plus sequence/domain utilities:
 |--------|-------------|
 | **Phylogenetic Tree** | Fetch sequences by Pfam/taxon → align (MAFFT) → tree (FastTree/IQ-TREE) → interactive D3 viewer or ETE4 explorer with domain shapes |
 | **Presence / Absence** | Taxa × Pfam profile heatmap; drill into any cell for sub-profiles or domain architecture breakdown |
-| **High-Res Profile** | Partition gene trees into subclade (paralog) groups and profile each subclade separately across taxa |
+| **High-Res Profile** | Partition gene trees into subclade (paralog) groups — by depth, manual MRCA, node path, or automatic duplication detection — and profile each subclade separately across taxa |
 | **Utilities** | Standard retrieval, HMM search, accession lookup, domain coordinates, GO→domain profiles, branch extraction |
 
 ---
@@ -137,6 +137,17 @@ Split the Glycolytic gene tree into subclade groups (paralogs A/B/C…) and prof
 
 Columns are `Pfam·Subclade` pairs; the color stripe groups subclades by parent Pfam. Export as CSV or PNG.
 
+Four ways to define the subclades:
+
+| Mode | How subclades are chosen |
+|------|--------------------------|
+| **Depth slider** | Cut the tree at a chosen root-to-node distance; every branch crossing that depth starts a subclade |
+| **Manual MRCA** | Pick groups of leaves; each group's most recent common ancestor becomes one subclade |
+| **Node path** | Name internal nodes explicitly by their child-index path from the root |
+| **Auto duplication** | Give a taxonomic group (NCBI taxid, e.g. 33213 = Bilateria); nodes where the same species appears on both sides of a split — a duplication signature — become the split points |
+
+Auto duplication works best for families with a handful of ancient paralog groups. For large superfamilies (thousands of leaves) the outermost duplication sits near the root and yields only a coarse 2-way split — use the depth slider there instead.
+
 Species tree with Phylogenetic Profile each taxon for the subclades of interest.
 
 ![high-re profile ete tree](figures/profile_ete.png)
@@ -156,13 +167,15 @@ uniprot-lab-manager-copy/
 │   ├── tree.html
 │   ├── presence.html
 │   ├── highres.html
+│   ├── profiling.html                # Combined Presence/Absence + High-Res page
 │   └── utilities.html
 ├── static/                           # CSS / JS assets
 ├── get_reference_uniprot_set_lib.py  # Backend retrieval library (importable)
 ├── tree_from_db.py                   # CLI: fetch → align → tree → viewer
 ├── subclade_partition.py             # Partition gene trees into subclades
 ├── tree_builder.py                   # Per-Pfam tree orchestration + caching
-├── interactive_tree_component.py     # D3-based tree viewer (HTML/JS)
+├── ete_profile.py                    # ETE4 viewer — presence/absence on NCBI tree
+├── ete_highres_profile.py            # ETE4 viewer — high-res profile on NCBI tree
 ├── viz_utils.py                      # Heatmap, domain diagram, tree rendering
 ├── utils.py                          # Shared helpers
 ├── figures/                          # Screenshots for README
@@ -189,7 +202,7 @@ All managed via `uniprot-lab-manager.yml`.
 - Output files (`.fa`, `.mft`, `.nwk`, `.itol_*.txt`) are written to the path given by `--prefix` and excluded from version control via `.gitignore`.
 - The `.env` file contains credentials — never commit it.
 - As an alternative for visualizing trees, load the `.nwk` + `.itol_colors.txt` + `.itol_domains.txt` files into [iTOL](https://itol.embl.de).
-- ETE4 interactive viewer requires port 5001 (default). The D3 viewer has no server dependency.
+- ETE4 interactive viewer starts a local server on the first free port in the range 5001–5050 (auto-selected, so multiple trees can be opened at once). The D3 viewer has no server dependency.
 - High-res profiling caches trees by build parameters; rerunning with the same settings reuses the cache.
 
 **[Full API reference & CLI guide](API_REFERENCE.md)**
