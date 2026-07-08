@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
-{% block title %}About — PhyloWave{% endblock %}
+{% block title %}About — FORK{% endblock %}
 
 {% block page_header %}
 <h1>About</h1>
-<p>The lab behind PhyloWave, and what the tool does.</p>
+<p>The lab behind FORK, and what the tool does.</p>
 {% endblock %}
 
 {% block content %}
@@ -21,7 +21,7 @@
     border:1px solid var(--border); background:#fff; padding:6px;
   }
   .about-hero h2 { font-family:var(--serif); font-size:22px; margin:0 0 4px; }
-  .about-hero .wave-mark { width:30px; height:17px; vertical-align:middle; margin-right:6px; }
+  .about-hero .fork-mark { height:26px; vertical-align:-0.32em; margin-right:8px; }
   .about-hero p { color:var(--text-muted); font-size:13.5px; margin:0; }
   .about-sec { margin:28px 0 12px; display:flex; align-items:center; gap:12px; }
   .about-sec h2 { font-family:var(--serif); font-size:18px; margin:0; }
@@ -47,7 +47,7 @@
             style="width:180px;max-width:55vw;height:auto;display:block;cursor:pointer;"></canvas>
   </a>
   <div>
-    <h2><svg class="wave-mark" viewBox="0 0 30 18" fill="none" stroke-width="2.6" stroke-linecap="round"><path d="M2 11 Q6.5 3 11 11 T20 11 T29 8"/></svg>PhyloWave</h2>
+    <h2><svg class="fork-mark" viewBox="0 0 40 48" aria-hidden="true"><use href="#fork-logo"/></svg>FORK</h2>
     <p>A reference-proteome analysis workspace built at the Comparative Genomics Lab (CGLab), IMBB-FORTH.</p>
   </div>
 </div>
@@ -81,7 +81,7 @@
 <div class="about-sec"><h2>About the tool</h2><span class="rule"></span></div>
 <div class="about-body">
   <p>
-    <strong>PhyloWave</strong> is a Flask web app for querying, visualizing, and comparing
+    <strong>FORK</strong> is a Flask web app for querying, visualizing, and comparing
     proteins across a <strong>local UniProt Reference Proteomes database</strong> enriched with
     Pfam-A HMM search results. Once the database is set up, queries run entirely offline — no
     internet needed.

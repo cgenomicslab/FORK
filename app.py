@@ -1770,7 +1770,7 @@ def ete4_load_proxy(port):
 def _pick_app_port(preferred, host="0.0.0.0", span=100):
     """Return `preferred` if it's free, otherwise the next free port above it.
 
-    Lets several people run PhyloWave on the same machine without editing the
+    Lets several people run FORK on the same machine without editing the
     file: if the port is taken, the app just moves to the next open one.
     (Named differently from `_find_free_port`, which picks ETE4 viewer ports.)
     """
@@ -1790,6 +1790,6 @@ if __name__ == "__main__":
     preferred = int(os.environ.get("PORT", "8080"))
     port = _pick_app_port(preferred, host)
     if port != preferred:
-        print(f"[PhyloWave] Port {preferred} is in use — using {port} instead.")
-    print(f"[PhyloWave] Serving on http://localhost:{port}  (Ctrl-C to stop)")
+        print(f"[FORK] Port {preferred} is in use — using {port} instead.")
+    print(f"[FORK] Serving on http://localhost:{port}  (Ctrl-C to stop)")
     app.run(debug=False, host=host, port=port)

@@ -1,5 +1,5 @@
 """
-Visualization helper script for the UniProt Lab Manager.
+Visualization helper script for the FORK.
 
 All functions return a BytesIO image buffer that can be passed directly
 to st.image() in Streamlit, or saved to disk with open(..., "wb").write(buf.getvalue()).

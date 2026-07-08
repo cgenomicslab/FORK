@@ -1,6 +1,6 @@
 # API Reference Guide
 
-This document provides complete documentation for the backend retrieval tools, visualization scripts, and command-line pipelines of the **UniProt Lab Manager**.
+This document provides complete documentation for the backend retrieval tools, visualization scripts, and command-line pipelines of the **FORK**.
 
 ---
 

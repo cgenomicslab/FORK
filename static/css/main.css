@@ -1,5 +1,5 @@
 /* =================================================================
-   UniProt Lab Manager — Green app-shell theme
+   FORK — Green app-shell theme
    Phylogenetic-green palette, serif accents, sidebar + topbar shell
    ================================================================= */
 
@@ -181,10 +181,11 @@ html, body {
   margin-top: 6px; line-height: 1.6;
 }
 
-/* ---- PhyloWave brand mark (minimal wave) ---- */
-/* The wavy "P" that stands in for the first letter of PhyloWave (#pw-logo). It
-   scales with the surrounding text and sits on the baseline. */
-.pw-letter { height: 1.15em; width: auto; vertical-align: -0.22em; }
+/* ---- FORK brand mark (minimal wave) ---- */
+/* Wooden three-tine fork mark next to the FORK wordmark (#fork-logo). */
+.fork-mark { width: auto; height: 1.3em; vertical-align: -0.3em; flex-shrink: 0; }
+.brand .fork-mark { height: 27px; vertical-align: middle; }
+.topbar-brand .fork-mark, .brand-foot .fork-mark { margin-right: 5px; }
 
 /* ---- Interactive CGLab pixel logo above SYSTEM (links to the lab site) ---- */
 .lab-logo-link {
@@ -195,7 +196,7 @@ html, body {
 }
 .lab-logo-link .ll-s { display: block; margin-top: 4px; font-size: 10px; color: var(--text-light); }
 
-/* ---- PhyloWave wordmark at sidebar bottom (down-left) ---- */
+/* ---- FORK wordmark at sidebar bottom (down-left) ---- */
 .brand-foot {
   padding: 12px 4px 2px; color: var(--text-light);
   font-family: var(--serif); font-size: 13px; font-weight: 600;

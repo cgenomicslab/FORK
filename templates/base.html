@@ -3,27 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}PhyloWave{% endblock %}</title>
+  <title>{% block title %}FORK{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
 
-<!-- PhyloWave logo: the letter P wrapped in cartoon waves. Defined once, reused
-     by every brand mark below via <use href="#pw-logo">. -->
+<!-- FORK logo: a wooden three-tined fork. Defined once, reused by every brand
+     mark below via <use href="#fork-logo">. -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="pw-logo" viewBox="0 0 50 56">
-    <!-- cartoon wave (behind) wrapping the plain black P -->
-    <path d="M1 48 C8 44 14 51 21 49 C28 47 31 41 38 42 C45 43 48 35 44 28 C41 23 34 24 35.5 29.5 C36.5 33 41 32.5 40 29.5" fill="#2f86d6"/>
-    <path d="M1 48 C8 44 14 51 21 49 C28 47 31 41 38 42" fill="none" stroke="#d7edfb" stroke-width="1.1" stroke-linecap="round"/>
-    <path d="M4 24 C1 15 8 8 15 10 C21 11.7 20 18.5 14 17.2 C10.5 16.4 11.5 12 15.5 13.6" fill="#2f86d6"/>
-    <circle cx="6.5" cy="12.5" r="2.4" fill="#ffffff"/>
-    <circle cx="10.8" cy="9.8" r="2" fill="#ffffff"/>
-    <circle cx="14.6" cy="10.4" r="1.4" fill="#ffffff"/>
-    <circle cx="43" cy="26" r="1.8" fill="#ffffff"/>
-    <circle cx="19" cy="6.6" r="1.3" fill="#2f86d6"/>
-    <circle cx="47" cy="21" r="1" fill="#2f86d6"/>
-    <!-- the plain black serif P on top -->
-    <text x="7" y="49" font-size="56" font-family="'Iowan Old Style', Palatino, 'Palatino Linotype', serif" font-weight="600" fill="#1A1C1A">P</text>
+  <symbol id="fork-logo" viewBox="0 0 40 48">
+    <g fill="none" stroke="#8a5a2b" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 3 C7 14 10 24 20 29"/>
+      <path d="M20 3 L20 29"/>
+      <path d="M33 3 C33 14 30 24 20 29"/>
+      <path d="M20 29 L20 46"/>
+    </g>
   </symbol>
 </svg>
 
@@ -35,8 +29,9 @@
   <aside class="sidebar">
 
     <a href="/" class="brand">
+      <svg class="fork-mark" viewBox="0 0 40 48" aria-hidden="true"><use href="#fork-logo"/></svg>
       <span>
-        <span class="brand-name"><svg class="pw-letter" viewBox="0 0 50 56" aria-hidden="true"><use href="#pw-logo"/></svg>hyloWave</span><br>
+        <span class="brand-name">FORK</span><br>
         <span class="brand-sub">CGLab Reference Proteomes</span>
       </span>
     </a>
@@ -90,8 +85,8 @@
         <div class="s">uniprot_db_cglab</div>
       </div>
 
-      <!-- PhyloWave wordmark (down-left) -->
-      <div class="brand-foot"><svg class="pw-letter" viewBox="0 0 50 56" aria-hidden="true"><use href="#pw-logo"/></svg>hyloWave</div>
+      <!-- FORK wordmark (down-left) -->
+      <div class="brand-foot"><svg class="fork-mark" viewBox="0 0 40 48" aria-hidden="true"><use href="#fork-logo"/></svg>FORK</div>
 
     </div>
 
@@ -103,7 +98,7 @@
   <div class="app-main">
 
     <div class="topbar">
-      <span class="topbar-brand"><svg class="pw-letter" viewBox="0 0 50 56" aria-hidden="true"><use href="#pw-logo"/></svg>hyloWave</span>
+      <span class="topbar-brand"><svg class="fork-mark" viewBox="0 0 40 48" aria-hidden="true"><use href="#fork-logo"/></svg>FORK</span>
       <span class="spacer"></span>
       <button class="db-connect-btn" id="db-toggle-btn">
         <span class="db-dot" id="header-db-dot"></span>
@@ -159,7 +154,7 @@
 
     <footer class="site-footer">
       <div class="footer-inner">
-        <p>PhyloWave &mdash; CGLab Reference Proteomes</p>
+        <p>FORK &mdash; CGLab Reference Proteomes</p>
         <p>
           <a href="https://www.uniprot.org" target="_blank" rel="noopener">UniProt</a> &middot;
           <a href="https://www.ebi.ac.uk/interpro/" target="_blank" rel="noopener">InterPro</a>
