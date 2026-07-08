@@ -237,12 +237,17 @@ if __name__ == "__main__":
     colormap = {}
     if args.get("colormap"):
         try:
+            # Parse tolerantly: skip blank/comment lines and any line that
+            # doesn't have at least a key and a colour, so one bad line can't
+            # wipe out the whole colormap.
             with open(args["colormap"]) as cm_f:
-                colormap = {
-                    line.split()[0]: line.split()[1].strip()
-                    for line in cm_f
-                    if line.strip()
-                }
+                for line in cm_f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        colormap[parts[0]] = parts[1]
         except Exception as e:
             print(f"WARNING--Failed parsing colormap file: {e}")
 
@@ -539,6 +544,12 @@ if __name__ == "__main__":
             # Annotate internal nodes with evoltype ("D"=duplication, "S"=speciation)
             try:
                 t.get_descendant_evol_events()
+                # Make sure evoltype is readable via node.props so the ortho/para
+                # layer always finds it (independent of any colormap upload).
+                for _n in t.traverse():
+                    _et = _n.props.get("evoltype") or getattr(_n, "evoltype", None)
+                    if _et and _n.props.get("evoltype") != _et:
+                        _n.add_prop("evoltype", _et)
                 print(
                     "INFO--Ortholog/paralog annotation complete (evoltype set on internal nodes)"
                 )
@@ -919,6 +930,39 @@ if __name__ == "__main__":
                 )
 
                 interactive_colormap = dict(colormap) if colormap else {}
+
+                # A user colormap may use clade/group taxids (e.g. 9443 Primates)
+                # rather than the exact leaf taxids. Resolve each leaf taxid to a
+                # colour by walking its NCBI lineage (exact match first, then the
+                # first matching ancestor) — same idea as ete_highres_profile.py.
+                # Without this, group-level colormaps colour nothing.
+                if color_by == "taxon" and interactive_colormap:
+                    try:
+                        from ete4 import NCBITaxa
+
+                        _ncbi = NCBITaxa()
+                        _priority = list(interactive_colormap.keys())
+                        _resolved = {}
+                        for _tid in sorted({n.name.split(".")[0] for n in t.leaves()}):
+                            if _tid in interactive_colormap:
+                                _resolved[_tid] = interactive_colormap[_tid]
+                                continue
+                            try:
+                                _lin = _ncbi.get_lineage(int(_tid)) or []
+                            except Exception:
+                                _lin = []
+                            for _p in _priority:
+                                try:
+                                    if int(_p) in _lin:
+                                        _resolved[_tid] = interactive_colormap[_p]
+                                        break
+                                except ValueError:
+                                    continue
+                        if _resolved:
+                            interactive_colormap = _resolved
+                    except Exception as e:
+                        print(f"WARNING--Colormap lineage resolution failed: {e}")
+
                 if color_by == "taxon" and not interactive_colormap:
                     distinct_palette = [
                         "#e6194B",

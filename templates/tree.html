@@ -313,7 +313,7 @@ async function runTree() {
     document.getElementById('run-btn').disabled = true;
     showEl('status-panel');
     document.getElementById('status-dot').className = 'status-dot running';
-    document.getElementById('status-text').textContent = 'Running pipeline…';
+    document.getElementById('status-text').textContent = 'Building tree…';
     document.getElementById('status-log').textContent = '';
 
     try {
@@ -338,6 +338,12 @@ async function pollStatus() {
 
         if (data.log && data.log.length) {
             document.getElementById('status-log').textContent = data.log.join('\n');
+            // show the latest progress line as a live "building" message
+            if (data.status !== 'done' && data.status !== 'error') {
+                const last = (data.log[data.log.length - 1] || '').trim();
+                document.getElementById('status-text').textContent =
+                    last ? last.slice(0, 90) : 'Building tree…';
+            }
         }
 
         if (data.status === 'done') {

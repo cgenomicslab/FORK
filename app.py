@@ -35,12 +35,17 @@ import get_reference_uniprot_set_lib as uni
 import viz_utils as viz
 import subclade_partition as sp
 import tree_builder as tb
+import recent_runs as rr  # green UI: read-only dashboard helper
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = None
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(24)
+# Pick up template edits (e.g. the logo in base.html) on a plain page reload,
+# without needing to restart the app.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.jinja_env.auto_reload = True
 
 
 def _find_free_port(start=5001, end=5050):
@@ -78,7 +83,7 @@ def _get_config():
     return cfg
 
 
-def _new_job(job_type):
+def _new_job(job_type, meta=None):
     job_id = uuid.uuid4().hex[:12]
     with _job_lock:
         _jobs[job_id] = {
@@ -87,6 +92,8 @@ def _new_job(job_type):
             "log": [],
             "result": None,
             "error": None,
+            "created": time.time(),   # green UI: for the Recent runs dashboard
+            "meta": meta or {},       # green UI: family / method / output path
         }
     return job_id
 
@@ -124,6 +131,11 @@ def profiling_page():
 @app.route("/utilities")
 def utilities_page():
     return render_template("utilities.html")
+
+
+@app.route("/about")
+def about_page():
+    return render_template("about.html")
 
 
 # ==============================================================================================================
@@ -179,6 +191,21 @@ def api_db_info():
         return jsonify({"versions": versions})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/recent-runs")
+def api_recent_runs():
+    """Recent activity for the Overview dashboard.
+
+    Reads the job registry and mirrors it into a small history file so runs
+    persist across restarts. Does not touch any analysis output.
+    """
+    try:
+        with _job_lock:
+            runs = rr.collect(_jobs)
+        return jsonify({"runs": runs})
+    except Exception as e:
+        return jsonify({"runs": [], "error": str(e)})
 
 
 # ==============================================================================================================
@@ -272,7 +299,14 @@ def api_run_tree():
         tmp.close()
         colormap_path = tmp.name
 
-    job_id = _new_job("tree")
+    job_id = _new_job(
+        "tree",
+        meta={
+            "pfam": pfam,
+            "method": f"{aln} → {ml}",
+            "output": output_dir or prefix,
+        },
+    )
 
     def run():
         try:
@@ -329,7 +363,27 @@ def api_run_tree():
                 if attach_msa:
                     cmd += ["--MSA"]
                 os.system(f"fuser -k {ete4_port}/tcp >/dev/null 2>&1")
-                proc = subprocess.Popen(cmd, env=env)
+                proc = subprocess.Popen(
+                    cmd,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+
+                # Stream the build's progress into the job log while it runs, so
+                # the tree page shows live messages (fetching, aligning, building
+                # tree, starting the ETE4 server…). Runs in a thread because the
+                # ETE4 server keeps printing after the tree is built.
+                def _pump_log(p=proc):
+                    try:
+                        for line in p.stdout:
+                            with _job_lock:
+                                _jobs[job_id]["log"].append(line.rstrip())
+                    except Exception:
+                        pass
+
+                threading.Thread(target=_pump_log, daemon=True).start()
 
                 deadline = time.time() + 600
                 while time.time() < deadline:
@@ -368,13 +422,25 @@ def api_run_tree():
                 if static_layers:
                     cmd += ["--static_layers", static_layers]
 
-                proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+                # Stream progress into the job log so the tree page shows live
+                # build messages while the static image is being rendered.
+                proc = subprocess.Popen(
+                    cmd,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                for line in proc.stdout:
+                    with _job_lock:
+                        _jobs[job_id]["log"].append(line.rstrip())
+                proc.wait()
                 if proc.returncode != 0:
                     with _job_lock:
                         _jobs[job_id].update(
                             {
                                 "status": "error",
-                                "error": proc.stderr or "Pipeline crashed.",
+                                "error": f"Pipeline exited with code {proc.returncode} (see log).",
                             }
                         )
                     return
@@ -741,7 +807,14 @@ def api_highres_build_trees():
     if not pfams:
         return jsonify({"error": "At least one Pfam ID is required."}), 400
 
-    job_id = _new_job("highres_trees")
+    job_id = _new_job(
+        "highres_trees",
+        meta={
+            "pfam": ", ".join(pfams),
+            "method": f"{aln} → {ml}",
+            "output": output_root,
+        },
+    )
 
     def run():
         log = []
@@ -1694,5 +1767,29 @@ def ete4_load_proxy(port):
         return jsonify({"error": str(e)}), 502
 
 
+def _pick_app_port(preferred, host="0.0.0.0", span=100):
+    """Return `preferred` if it's free, otherwise the next free port above it.
+
+    Lets several people run PhyloWave on the same machine without editing the
+    file: if the port is taken, the app just moves to the next open one.
+    (Named differently from `_find_free_port`, which picks ETE4 viewer ports.)
+    """
+    for port in range(preferred, preferred + span):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((host, port))
+                return port
+            except OSError:
+                continue  # in use — try the next one
+    return preferred  # give up scanning; app.run will report the real error
+
+
 if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=8080)
+    host = "0.0.0.0"
+    preferred = int(os.environ.get("PORT", "8080"))
+    port = _pick_app_port(preferred, host)
+    if port != preferred:
+        print(f"[PhyloWave] Port {preferred} is in use — using {port} instead.")
+    print(f"[PhyloWave] Serving on http://localhost:{port}  (Ctrl-C to stop)")
+    app.run(debug=False, host=host, port=port)

@@ -3,108 +3,268 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}UniProt Lab Manager{% endblock %}</title>
+  <title>{% block title %}PhyloWave{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
 
-<!-- ================================================================
-     SITE HEADER
-     ================================================================ -->
-<header class="site-header">
-  <div class="header-inner">
+<!-- PhyloWave logo: the letter P wrapped in cartoon waves. Defined once, reused
+     by every brand mark below via <use href="#pw-logo">. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="pw-logo" viewBox="0 0 50 56">
+    <!-- cartoon wave (behind) wrapping the plain black P -->
+    <path d="M1 48 C8 44 14 51 21 49 C28 47 31 41 38 42 C45 43 48 35 44 28 C41 23 34 24 35.5 29.5 C36.5 33 41 32.5 40 29.5" fill="#2f86d6"/>
+    <path d="M1 48 C8 44 14 51 21 49 C28 47 31 41 38 42" fill="none" stroke="#d7edfb" stroke-width="1.1" stroke-linecap="round"/>
+    <path d="M4 24 C1 15 8 8 15 10 C21 11.7 20 18.5 14 17.2 C10.5 16.4 11.5 12 15.5 13.6" fill="#2f86d6"/>
+    <circle cx="6.5" cy="12.5" r="2.4" fill="#ffffff"/>
+    <circle cx="10.8" cy="9.8" r="2" fill="#ffffff"/>
+    <circle cx="14.6" cy="10.4" r="1.4" fill="#ffffff"/>
+    <circle cx="43" cy="26" r="1.8" fill="#ffffff"/>
+    <circle cx="19" cy="6.6" r="1.3" fill="#2f86d6"/>
+    <circle cx="47" cy="21" r="1" fill="#2f86d6"/>
+    <!-- the plain black serif P on top -->
+    <text x="7" y="49" font-size="56" font-family="'Iowan Old Style', Palatino, 'Palatino Linotype', serif" font-weight="600" fill="#1A1C1A">P</text>
+  </symbol>
+</svg>
 
-    <a href="/" class="header-brand">
-      <img src="/static/logo.png" alt="Logo">
-      <div>
-        <div class="brand-name">UniProt Lab Manager</div>
-        <div class="brand-sub">CGLab Reference Proteomes</div>
-      </div>
+<div class="app">
+
+  <!-- ================================================================
+       SIDEBAR
+       ================================================================ -->
+  <aside class="sidebar">
+
+    <a href="/" class="brand">
+      <span>
+        <span class="brand-name"><svg class="pw-letter" viewBox="0 0 50 56" aria-hidden="true"><use href="#pw-logo"/></svg>hyloWave</span><br>
+        <span class="brand-sub">CGLab Reference Proteomes</span>
+      </span>
     </a>
 
-    <nav class="main-nav">
-      <a href="/">Home</a>
-      <a href="/tree">Phylogenetic Tree</a>
-      <a href="/profiling">Phylogenetic Profiling</a>
-      <a href="/utilities">Utilities</a>
-    </nav>
+    <a href="/tree" class="side-cta">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+      New analysis
+    </a>
 
-    <div class="header-tools">
+    <div class="nav-group">
+      <div class="nav-label">Workspace</div>
+      <a href="/" class="nav-item">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Overview
+      </a>
+      <a href="/about" class="nav-item">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 11.5v5"/><circle cx="12" cy="7.8" r="0.9" fill="currentColor" stroke="none"/></svg>
+        About
+      </a>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-label">Analysis</div>
+      <a href="/tree" class="nav-item">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M6 3v6a3 3 0 0 0 3 3h6"/><path d="M18 9v12"/><circle cx="6" cy="3" r="1.6"/><circle cx="18" cy="9" r="1.6"/><circle cx="18" cy="21" r="1.6"/></svg>
+        Phylogenetic Tree
+      </a>
+      <a href="/profiling" class="nav-item">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+        Phylogenetic Profiling
+      </a>
+      <a href="/utilities" class="nav-item">
+        <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M4 6h10M4 12h16M4 18h8"/><circle cx="18" cy="6" r="2"/><circle cx="16" cy="18" r="2"/></svg>
+        Utilities
+      </a>
+    </div>
+
+    <div class="side-foot">
+
+      <!-- Interactive CGLab pixel logo (above SYSTEM) — links to the lab website -->
+      <a href="https://cgenomicslab.org/" target="_blank" rel="noopener"
+         class="lab-logo-link" aria-label="CGLab — Comparative Genomics Lab"
+         title="Comparative Genomics Lab — visit cgenomicslab.org">
+        <canvas class="pixel-logo" aria-label="CGLab" role="img" title="CGLab"></canvas>
+        <span class="ll-s">IMBB-FORTH · cgenomicslab.org</span>
+      </a>
+
+      <div class="nav-label">System</div>
+      <div class="side-db">
+        <div class="row"><span class="side-dot"></span><span class="t">Reference database</span></div>
+        <div class="s">uniprot_db_cglab</div>
+      </div>
+
+      <!-- PhyloWave wordmark (down-left) -->
+      <div class="brand-foot"><svg class="pw-letter" viewBox="0 0 50 56" aria-hidden="true"><use href="#pw-logo"/></svg>hyloWave</div>
+
+    </div>
+
+  </aside>
+
+  <!-- ================================================================
+       MAIN COLUMN
+       ================================================================ -->
+  <div class="app-main">
+
+    <div class="topbar">
+      <span class="topbar-brand"><svg class="pw-letter" viewBox="0 0 50 56" aria-hidden="true"><use href="#pw-logo"/></svg>hyloWave</span>
+      <span class="spacer"></span>
       <button class="db-connect-btn" id="db-toggle-btn">
         <span class="db-dot" id="header-db-dot"></span>
         Database
       </button>
     </div>
 
-  </div>
-</header>
+    <!-- DB CONFIG PANEL (markup + IDs unchanged from original) -->
+    <div class="db-config-panel" id="db-panel">
+      <div class="db-panel-header">
+        <h3>Database Connection</h3>
+        <p>Override .env defaults for this session. Leave blank to use environment values.</p>
+      </div>
+      <div class="db-panel-body">
+        <div class="form-group">
+          <label for="db-host">Host</label>
+          <input type="text" id="db-host" placeholder="localhost" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label for="db-user">User</label>
+          <input type="text" id="db-user" placeholder="lab_user" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label for="db-password">Password</label>
+          <input type="password" id="db-password" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <div class="form-group">
+          <label for="db-name">Database</label>
+          <input type="text" id="db-name" placeholder="uniprot_db_cglab" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label for="db-port">Port</label>
+          <input type="number" id="db-port" placeholder="3306" autocomplete="off">
+        </div>
+      </div>
+      <div class="db-panel-footer">
+        <span class="db-status-text" id="db-panel-status">—</span>
+        <button class="btn btn-sm btn-secondary" id="db-cancel-btn">Cancel</button>
+        <button class="btn btn-sm btn-primary" id="db-apply-btn">Apply</button>
+      </div>
+    </div>
 
-<!-- ================================================================
-     DB CONFIG PANEL
-     ================================================================ -->
-<div class="db-config-panel" id="db-panel">
-  <div class="db-panel-header">
-    <h3>Database Connection</h3>
-    <p>Override .env defaults for this session. Leave blank to use environment values.</p>
-  </div>
-  <div class="db-panel-body">
-    <div class="form-group">
-      <label for="db-host">Host</label>
-      <input type="text" id="db-host" placeholder="localhost" autocomplete="off">
-    </div>
-    <div class="form-group">
-      <label for="db-user">User</label>
-      <input type="text" id="db-user" placeholder="lab_user" autocomplete="off">
-    </div>
-    <div class="form-group">
-      <label for="db-password">Password</label>
-      <input type="password" id="db-password" placeholder="••••••••" autocomplete="current-password">
-    </div>
-    <div class="form-group">
-      <label for="db-name">Database</label>
-      <input type="text" id="db-name" placeholder="uniprot_db_cglab" autocomplete="off">
-    </div>
-    <div class="form-group">
-      <label for="db-port">Port</label>
-      <input type="number" id="db-port" placeholder="3306" autocomplete="off">
-    </div>
-  </div>
-  <div class="db-panel-footer">
-    <span class="db-status-text" id="db-panel-status">—</span>
-    <button class="btn btn-sm btn-secondary" id="db-cancel-btn">Cancel</button>
-    <button class="btn btn-sm btn-primary" id="db-apply-btn">Apply</button>
+    <main class="site-main">
+      <div class="page-title-bar">
+        <div class="page-title-bar-inner">
+          {% block page_header %}{% endblock %}
+        </div>
+      </div>
+      <div class="page-body">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <p>PhyloWave &mdash; CGLab Reference Proteomes</p>
+        <p>
+          <a href="https://www.uniprot.org" target="_blank" rel="noopener">UniProt</a> &middot;
+          <a href="https://www.ebi.ac.uk/interpro/" target="_blank" rel="noopener">InterPro</a>
+        </p>
+      </div>
+    </footer>
+
   </div>
 </div>
 
-<!-- ================================================================
-     MAIN CONTENT
-     ================================================================ -->
-<main class="site-main">
-  <div class="page-title-bar">
-    <div class="page-title-bar-inner">
-      {% block page_header %}{% endblock %}
-    </div>
-  </div>
-  <div class="page-body">
-    {% block content %}{% endblock %}
-  </div>
-</main>
-
-<!-- ================================================================
-     FOOTER
-     ================================================================ -->
-<footer class="site-footer">
-  <div class="footer-inner">
-    <p>UniProt Lab Manager &mdash; CGLab Reference Proteomes</p>
-    <p>
-      <a href="https://www.uniprot.org" target="_blank" rel="noreferrer">UniProt</a> &middot;
-      <a href="https://pfam.xfam.org"   target="_blank" rel="noreferrer">Pfam</a> &middot;
-      <a href="https://eggnogdb.org"    target="_blank" rel="noreferrer">EggNOG</a>
-    </p>
-  </div>
-</footer>
-
 <script src="/static/js/app.js"></script>
+
+<!-- Interactive CGLab pixel logo (cursor-repel physics) — reproduced verbatim
+     from cgenomicslab.org. Initialises every <canvas class="pixel-logo">. -->
+<script>
+(function(){
+  // [x, y, colorIndex] in box-width units — exact from the lab site's logo
+  var CELLS=[[1.198,0.0,0],[2.409,0.0,0],[5.509,0.0,1],[6.72,0.0,1],[0.0,0.045,0],[4.311,0.045,1],[8.622,0.045,2],[17.438,0.045,2],[0.0,1.255,0],[4.311,1.255,1],[8.622,1.255,2],[12.996,1.255,2],[14.207,1.255,2],[15.405,1.255,2],[17.438,1.255,2],[0.0,2.466,0],[4.311,2.466,1],[6.72,2.466,1],[8.622,2.466,2],[15.405,2.466,2],[17.438,2.466,2],[0.0,3.677,0],[4.311,3.677,1],[6.72,3.677,1],[8.622,3.677,2],[12.996,3.677,2],[14.207,3.677,2],[15.405,3.677,2],[17.438,3.677,2],[18.635,3.677,2],[19.846,3.677,2],[0.0,4.888,0],[1.198,4.888,0],[2.409,4.888,0],[4.311,4.888,1],[5.509,4.888,1],[6.72,4.888,1],[8.622,4.888,2],[9.82,4.888,2],[11.031,4.888,2],[12.996,4.888,2],[14.207,4.888,2],[15.405,4.888,2],[17.438,4.888,2],[18.635,4.888,2],[19.846,4.888,2]];
+  var GRID_W=20.846, GRID_H=5.888;
+  var GHOST="#d7d9dd";
+  var COLORS=["#939597","#652c90","#d5a928"]; // 0=C gray, 1=G purple, 2=Lab amber
+  var BOX=11, PAD=3.0, REPEL=4000, RANGE=9.0, RMIN=2.0, SPRING=0.05, DAMP=0.72;
+
+  function initPixelLogo(canvas){
+    var ctx=canvas.getContext('2d');
+    var dpr=Math.max(1, window.devicePixelRatio||1);
+    var nodes=[], W=0, H=0, running=false;
+    var mouse={x:-1e5,y:-1e5,active:false};
+
+    function build(){
+      nodes=[];
+      for(var i=0;i<CELLS.length;i++){
+        var hx=(CELLS[i][0]+PAD)*BOX, hy=(CELLS[i][1]+PAD)*BOX;
+        nodes.push({hx:hx,hy:hy,x:hx,y:hy,vx:0,vy:0,color:COLORS[CELLS[i][2]]});
+      }
+      W=(GRID_W+2*PAD)*BOX; H=(GRID_H+2*PAD)*BOX;
+      canvas.width=W*dpr; canvas.height=H*dpr;
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      draw(); layout();
+    }
+    function layout(){
+      var rect=canvas.getBoundingClientRect();
+      if(!rect.width) return;
+      var pad=PAD*BOX*(rect.width/W);
+      canvas.style.marginLeft=(-pad)+'px';
+      canvas.style.marginTop=(-pad)+'px';
+      canvas.style.marginBottom=(-pad)+'px';
+    }
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      var i,p;
+      ctx.fillStyle=GHOST;
+      for(i=0;i<nodes.length;i++){ p=nodes[i]; ctx.fillRect(p.hx,p.hy,BOX,BOX); }
+      for(i=0;i<nodes.length;i++){ p=nodes[i]; ctx.fillStyle=p.color; ctx.fillRect(p.x,p.y,BOX,BOX); }
+    }
+    function step(){
+      var range=RANGE*BOX, rmin=RMIN*BOX, moving=false;
+      for(var i=0;i<nodes.length;i++){
+        var p=nodes[i];
+        var ax=(p.hx-p.x)*SPRING, ay=(p.hy-p.y)*SPRING;
+        if(mouse.active){
+          var dx=(p.x+BOX/2)-mouse.x, dy=(p.y+BOX/2)-mouse.y;
+          var d=Math.sqrt(dx*dx+dy*dy)||0.0001;
+          if(d<range){
+            var dd=Math.max(d,rmin);
+            var f=(REPEL/(dd*dd))*(1-d/range);
+            ax+=(dx/d)*f; ay+=(dy/d)*f;
+          }
+        }
+        p.vx=(p.vx+ax)*DAMP; p.vy=(p.vy+ay)*DAMP;
+        p.x+=p.vx; p.y+=p.vy;
+        if(Math.abs(p.vx)+Math.abs(p.vy)>0.05 ||
+           Math.abs(p.x-p.hx)+Math.abs(p.y-p.hy)>0.05) moving=true;
+      }
+      draw(); return moving;
+    }
+    function run(){
+      if(running) return; running=true;
+      requestAnimationFrame(function loop(){
+        var moving=step();
+        if(moving||mouse.active) requestAnimationFrame(loop); else running=false;
+      });
+    }
+    function toLocal(e){
+      var r=canvas.getBoundingClientRect();
+      mouse.x=(e.clientX-r.left)*(W/r.width);
+      mouse.y=(e.clientY-r.top)*(H/r.height);
+    }
+    canvas.addEventListener('pointermove',function(e){ toLocal(e); mouse.active=true; run(); });
+    canvas.addEventListener('pointerenter',function(e){ toLocal(e); mouse.active=true; run(); });
+    canvas.addEventListener('pointerleave',function(){ mouse.active=false; run(); });
+    window.addEventListener('resize',layout);
+    setTimeout(layout,200);
+    build();
+  }
+
+  function initAll(){
+    var cs=document.querySelectorAll('canvas.pixel-logo');
+    for(var i=0;i<cs.length;i++) initPixelLogo(cs[i]);
+  }
+  if(document.readyState!=='loading') initAll();
+  else document.addEventListener('DOMContentLoaded',initAll);
+})();
+</script>
+
 {% block scripts %}{% endblock %}
 </body>
 </html>

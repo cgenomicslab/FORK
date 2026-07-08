@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}About — PhyloWave{% endblock %}
+
+{% block page_header %}
+<h1>About</h1>
+<p>The lab behind PhyloWave, and what the tool does.</p>
+{% endblock %}
+
+{% block content %}
+
+<style>
+  /* About page — self-contained layout (uses the shared design tokens) */
+  .about-hero {
+    display:flex; align-items:center; gap:18px;
+    padding:22px 24px; margin-bottom:26px;
+    border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-card);
+  }
+  .about-hero img {
+    width:72px; height:72px; border-radius:12px; flex:none;
+    border:1px solid var(--border); background:#fff; padding:6px;
+  }
+  .about-hero h2 { font-family:var(--serif); font-size:22px; margin:0 0 4px; }
+  .about-hero .wave-mark { width:30px; height:17px; vertical-align:middle; margin-right:6px; }
+  .about-hero p { color:var(--text-muted); font-size:13.5px; margin:0; }
+  .about-sec { margin:28px 0 12px; display:flex; align-items:center; gap:12px; }
+  .about-sec h2 { font-family:var(--serif); font-size:18px; margin:0; }
+  .about-sec .rule { flex:1; height:1px; background:var(--border); }
+  .about-body { font-size:14px; line-height:1.65; color:var(--text); max-width:760px; }
+  .about-body p { margin:0 0 12px; }
+  .about-body a { color:var(--accent); text-decoration:none; }
+  .about-body a:hover { text-decoration:underline; }
+  .about-meta { display:flex; flex-wrap:wrap; gap:10px 22px; margin-top:10px; }
+  .about-meta div { font-size:12.5px; }
+  .about-meta .k { color:var(--text-light); text-transform:uppercase; letter-spacing:.08em; font-size:10.5px; font-weight:700; }
+  .about-meta .v { color:var(--text); font-weight:600; }
+  .mod-tbl { width:100%; border-collapse:collapse; margin-top:6px; font-size:13.5px; }
+  .mod-tbl th, .mod-tbl td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .mod-tbl th { font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--text-light); }
+  .mod-tbl td:first-child { font-weight:600; white-space:nowrap; }
+</style>
+
+<!-- Lab identity -->
+<div class="about-hero">
+  <a href="https://cgenomicslab.org/" target="_blank" rel="noopener" title="Visit the lab website" style="display:block;">
+    <canvas class="pixel-logo" aria-label="CGLab" role="img" title="CGLab"
+            style="width:180px;max-width:55vw;height:auto;display:block;cursor:pointer;"></canvas>
+  </a>
+  <div>
+    <h2><svg class="wave-mark" viewBox="0 0 30 18" fill="none" stroke-width="2.6" stroke-linecap="round"><path d="M2 11 Q6.5 3 11 11 T20 11 T29 8"/></svg>PhyloWave</h2>
+    <p>A reference-proteome analysis workspace built at the Comparative Genomics Lab (CGLab), IMBB-FORTH.</p>
+  </div>
+</div>
+
+<!-- About the lab -->
+<div class="about-sec"><h2>About the lab</h2><span class="rule"></span></div>
+<div class="about-body">
+  <p>
+    The <strong>IMBB Comparative Genomics Lab (CGLab)</strong>, led by
+    <strong>Alexandros Pittis</strong>, combines comparative genomics, phylogenomics and
+    single-cell transcriptomics to investigate how molecular and cellular complexity —
+    particularly of the nervous system — emerges through evolution. The lab's work integrates
+    protein-family analysis, transcriptional regulation, and nervous-system evolution with
+    computational-biology approaches.
+  </p>
+  <p>
+    The lab is part of the <strong>Institute of Molecular Biology and Biotechnology
+    (IMBB-FORTH)</strong> in Heraklion, Crete, within the Evolution, Development &amp; Cell
+    Biology division. Learn more at
+    <a href="https://cgenomicslab.org/" target="_blank" rel="noopener">cgenomicslab.org</a>.
+  </p>
+  <div class="about-meta">
+    <div><div class="k">Lab</div><div class="v">Comparative Genomics Lab (CGLab)</div></div>
+    <div><div class="k">PI</div><div class="v">Alexandros Pittis</div></div>
+    <div><div class="k">Institute</div><div class="v">IMBB-FORTH · Heraklion, Crete</div></div>
+    <div><div class="k">Website</div><div class="v"><a href="https://cgenomicslab.org/" target="_blank" rel="noopener">cgenomicslab.org</a></div></div>
+  </div>
+</div>
+
+<!-- About the tool -->
+<div class="about-sec"><h2>About the tool</h2><span class="rule"></span></div>
+<div class="about-body">
+  <p>
+    <strong>PhyloWave</strong> is a Flask web app for querying, visualizing, and comparing
+    proteins across a <strong>local UniProt Reference Proteomes database</strong> enriched with
+    Pfam-A HMM search results. Once the database is set up, queries run entirely offline — no
+    internet needed.
+  </p>
+  <p>It provides three main analysis modules, plus sequence/domain utilities:</p>
+  <table class="mod-tbl">
+    <thead>
+      <tr><th>Module</th><th>What you get</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Phylogenetic Tree</td>
+        <td>Fetch sequences by Pfam/taxon → align (MAFFT) → tree (FastTree/IQ-TREE) →
+          interactive D3 viewer or ETE4 explorer with domain shapes.</td>
+      </tr>
+      <tr>
+        <td>Presence / Absence</td>
+        <td>Taxa × Pfam profile heatmap; drill into any cell for sub-profiles or domain
+          architecture breakdown.</td>
+      </tr>
+      <tr>
+        <td>High-Res Profile</td>
+        <td>Partition gene trees into subclade (paralog) groups — by depth, manual MRCA, node
+          path, or automatic duplication detection — and profile each subclade separately
+          across taxa.</td>
+      </tr>
+      <tr>
+        <td>Utilities</td>
+        <td>Standard retrieval, HMM search, accession lookup, domain coordinates, GO→domain
+          profiles, and branch extraction.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

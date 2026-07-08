@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded', initFileInputs);
 
 document.addEventListener('DOMContentLoaded', () => {
     const path = window.location.pathname;
-    document.querySelectorAll('.main-nav a').forEach(a => {
+    document.querySelectorAll('.main-nav a, .sidebar a.nav-item').forEach(a => {
         if (a.getAttribute('href') === path) a.classList.add('active');
     });
 });

@@ -1,104 +1,216 @@
 {% extends "base.html" %}
 
-{% block title %}UniProt Lab Manager{% endblock %}
+{% block title %}Overview — UniProt Lab Manager{% endblock %}
 
 {% block page_header %}
-<h1>UniProt Lab Manager</h1>
-<p>Local reference-proteome analysis suite — sequence retrieval, phylogenetics, and domain profiling for CGLab.</p>
+<h1>Overview</h1>
+<p>Reference-proteome analysis workspace — sequence retrieval, phylogenetics, and domain profiling for CGLab.</p>
 {% endblock %}
 
 {% block content %}
 
-<!-- Hero description -->
-<div class="home-hero">
-  <img src="/static/logo.png" alt="Logo" class="home-hero-logo">
-  <div class="home-hero-text">
-    <h2>Reference Proteome Analysis Suite</h2>
-    <p>
-      Query and explore a local mirror of UniProt reference proteomes.
-      Build phylogenetic trees, compute presence/absence matrices across
-      organisms, construct fine-grained phylogenetic profiles from
-      partitioned gene trees, and perform batch sequence and domain lookups.
-    </p>
+<!-- KPI strip (wired to /api/db-info) -->
+<div class="kpis">
+  <div class="kpi">
+    <span class="k-label">Reference versions</span>
+    <span class="k-val" id="kpi-versions">—</span>
+    <span class="k-foot" id="kpi-versions-foot">loading…</span>
+  </div>
+  <div class="kpi">
+    <span class="k-label">Latest version</span>
+    <span class="k-val" id="kpi-latest">—</span>
+    <span class="k-foot">most recent build</span>
+  </div>
+  <div class="kpi">
+    <span class="k-label">Database</span>
+    <span class="k-val" id="kpi-db">—</span>
+    <span class="k-foot"><span class="d" id="kpi-db-dot"></span><span id="kpi-db-foot">checking…</span></span>
+  </div>
+  <div class="kpi">
+    <span class="k-label">Completed runs</span>
+    <span class="k-val" id="kpi-runs">—</span>
+    <span class="k-foot" id="kpi-runs-foot">loading…</span>
   </div>
 </div>
 
 <!-- Analysis modules -->
-<div class="home-section-title">Analysis Modules</div>
-<div class="home-grid">
+<div class="dash-sec"><h2>Analysis modules</h2><span class="rule"></span></div>
+<div class="mod-cards">
 
-  <a class="home-card" href="/tree">
-    <div class="home-card-tag">Phylogenetics</div>
-    <h2>Phylogenetic Tree</h2>
-    <p>Fetch sequences by Pfam / taxon filters, align with MAFFT, infer a maximum-likelihood tree, and visualize interactively or export as a static figure.</p>
+  <a class="mod-card" href="/tree">
+    <div class="c-top">
+      <canvas data-motif="tree" width="44" height="44"></canvas>
+      <div><div class="kicker">Phylogenetics</div><h3>Phylogenetic Tree</h3></div>
+    </div>
+    <p>Fetch by Pfam &amp; taxon, align with MAFFT, infer an ML tree, and explore it interactively with domain shapes.</p>
+    <div class="c-foot"><span class="chip">MAFFT · FastTree · IQ-TREE</span><span class="go">Open →</span></div>
   </a>
 
-  <a class="home-card" href="/presence">
-    <div class="home-card-tag">Comparative Genomics</div>
-    <h2>Presence / Absence</h2>
-    <p>Build a protein-family presence/absence matrix across organisms, render a clustered heatmap, and drill into any cell for sub-profiles and domain architectures.</p>
+  <a class="mod-card" href="/profiling">
+    <div class="c-top">
+      <canvas data-motif="heatmap" width="44" height="44"></canvas>
+      <div><div class="kicker">Comparative</div><h3>Phylo Profiling</h3></div>
+    </div>
+    <p>Presence/absence heatmaps, plus high-resolution subclade profiles from partitioned gene trees.</p>
+    <div class="c-foot"><span class="chip">4 partition modes</span><span class="go">Open →</span></div>
   </a>
 
-  <a class="home-card" href="/highres">
-    <div class="home-card-tag">High-Resolution</div>
-    <h2>High-Res Profile</h2>
-    <p>Partition per-Pfam gene trees into subclades (paralog groups) and assemble a fine-grained phylogenetic profile that captures lineage-specific expansions.</p>
+  <a class="mod-card" href="/utilities">
+    <div class="c-top">
+      <canvas data-motif="domains" width="44" height="44"></canvas>
+      <div><div class="kicker">Utilities</div><h3>Sequence &amp; Domain</h3></div>
+    </div>
+    <p>Retrieve by taxonomy, GO, or Pfam; run HMM searches; look up domain coordinates and branch sequences.</p>
+    <div class="c-foot"><span class="chip">6 tools</span><span class="go">Open →</span></div>
   </a>
 
 </div>
 
-<!-- Tools + DB status -->
-<div class="home-section-title">Tools &amp; Status</div>
-<div class="home-secondary">
-
-  <a class="home-card" href="/utilities">
-    <div class="home-card-tag">Utilities</div>
-    <h2>Sequence &amp; Domain Tools</h2>
-    <p>Retrieve sequences by taxonomy / proteome / GO / Pfam, run HMM searches, look up domain coordinates, query GO&rarr;domain profiles, and extract branch sequences.</p>
-  </a>
-
-  <div class="home-card" style="cursor:default;">
-    <div class="home-card-tag">Database</div>
-    <h2>Connection Status</h2>
-    <div class="db-status-row">
-      <span class="db-status-icon" id="home-db-icon"></span>
-      <span id="home-db-text" class="text-muted" style="font-size:13px;">Checking&hellip;</span>
-    </div>
-    <p id="home-db-versions" style="margin-top:8px;font-size:12px;color:var(--text-muted);"></p>
+<!-- Recent runs (real — from the on-disk tree cache + live jobs) -->
+<div class="dash-sec"><h2>Recent runs</h2><span class="rule"></span><span class="note" id="runs-note"></span></div>
+<div class="runs-wrap">
+  <div class="runs-scroll">
+    <table class="runs-table">
+      <thead>
+        <tr><th>Family</th><th class="num">Leaves</th><th>Method</th><th>Built</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody id="runs-body">
+        <tr><td colspan="6" style="color:var(--text-light);padding:18px 14px;">Loading…</td></tr>
+      </tbody>
+    </table>
   </div>
-
+  <div class="runs-cap">Every analysis you launch is listed here — regardless of the output path you choose.</div>
 </div>
 
 <script>
+// --- KPIs + DB status from the real API ---
 (async () => {
-    const icon = document.getElementById('home-db-icon');
-    const text = document.getElementById('home-db-text');
-    const vers = document.getElementById('home-db-versions');
+    const dot     = document.getElementById('kpi-db-dot');
+    const dbFoot  = document.getElementById('kpi-db-foot');
+    const dbVal   = document.getElementById('kpi-db');
+    const nVer     = document.getElementById('kpi-versions');
+    const nVerFoot = document.getElementById('kpi-versions-foot');
+    const latest   = document.getElementById('kpi-latest');
     try {
         const res  = await fetch('/api/db-info');
         const data = await res.json();
         if (data.error) {
-            icon.className = 'db-status-icon err';
-            text.textContent = 'Not connected';
-            text.style.color = 'var(--error)';
-            vers.textContent = data.error;
+            dbVal.textContent = 'Offline';
+            dot.className = 'd err'; dbFoot.textContent = 'not connected';
+            nVer.textContent = '—'; nVerFoot.textContent = data.error;
+            latest.textContent = '—';
         } else {
-            const versions = data.versions || [];
-            icon.className = 'db-status-icon ok';
-            text.textContent = 'Connected';
-            text.style.color = 'var(--success)';
-            if (versions.length) {
-                vers.textContent = 'Available versions: ' +
-                    versions.slice(0, 5).map(v => v.version || JSON.stringify(v)).join(', ') +
-                    (versions.length > 5 ? ' …' : '');
-            }
+            const versions = (data.versions || []).map(v => v.version || String(v));
+            dbVal.textContent = 'Online';
+            dot.className = 'd ok'; dbFoot.textContent = 'uniprot_db_cglab';
+            nVer.textContent = versions.length || '0';
+            nVerFoot.textContent = versions.length ? 'available' : 'none found';
+            latest.textContent = versions.length ? versions[0] : '—';
         }
     } catch (e) {
-        icon.className = 'db-status-icon err';
-        text.textContent = 'Connection error';
-        text.style.color = 'var(--error)';
-        vers.textContent = e.message;
+        dbVal.textContent = 'Offline';
+        dot.className = 'd err'; dbFoot.textContent = 'connection error';
+        nVer.textContent = '—'; nVerFoot.textContent = e.message;
     }
+})();
+
+// --- Recent runs (real) from /api/recent-runs ---
+(async () => {
+    const body     = document.getElementById('runs-body');
+    const note     = document.getElementById('runs-note');
+    const kRuns    = document.getElementById('kpi-runs');
+    const kRunsFt  = document.getElementById('kpi-runs-foot');
+
+    const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    const timeAgo = (sec) => {
+        const d = Date.now() / 1000 - sec;
+        if (d < 60)     return 'just now';
+        if (d < 3600)   return Math.floor(d / 60) + 'm ago';
+        if (d < 86400)  return Math.floor(d / 3600) + 'h ago';
+        return Math.floor(d / 86400) + 'd ago';
+    };
+    const pill = (s) => s === 'done'
+        ? '<span class="pill ok"><span class="ld"></span>done</span>'
+        : s === 'building'
+        ? '<span class="pill run"><span class="ld"></span>building</span>'
+        : '<span class="pill run"><span class="ld"></span>' + esc(s) + '</span>';
+
+    try {
+        const res  = await fetch('/api/recent-runs');
+        const data = await res.json();
+        const runs = data.runs || [];
+
+        // KPI: number of completed runs
+        const done = runs.filter(r => r.status === 'done').length;
+        kRuns.textContent = done;
+        kRunsFt.textContent = done ? 'finished' : 'none yet';
+
+        if (!runs.length) {
+            body.innerHTML = '<tr><td colspan="6" style="color:var(--text-light);padding:18px 14px;">'
+                + 'No runs yet — launch one from a module above and it will appear here.</td></tr>';
+            note.textContent = '';
+            return;
+        }
+
+        note.textContent = runs.length + (runs.length === 1 ? ' run' : ' runs');
+        body.innerHTML = runs.map(r => {
+            const fam    = /^PF\d+/i.test(r.family)
+                ? '<span class="pf">' + esc(r.family) + '</span>'
+                : esc(r.family);
+            const leaves = (r.leaves === null || r.leaves === undefined) ? '—'
+                : Number(r.leaves).toLocaleString();
+            const rid = encodeURIComponent(r.run_id || '');
+            const action = r.status === 'done'
+                ? (r.type === 'highres_trees'
+                    ? '<a href="/profiling?job=' + rid + '">Profile</a>'
+                    : '<a href="/tree?job=' + rid + '">Open</a>')
+                : '<span class="mono" style="color:var(--text-light);">in progress</span>';
+            return '<tr>'
+                + '<td class="fam">' + fam + '</td>'
+                + '<td class="num">' + leaves + '</td>'
+                + '<td class="mono">' + esc(r.method) + '</td>'
+                + '<td class="mono">' + timeAgo(r.mtime) + '</td>'
+                + '<td>' + pill(r.status) + '</td>'
+                + '<td class="t-actions">' + action + '</td>'
+                + '</tr>';
+        }).join('');
+    } catch (e) {
+        kRuns.textContent = '—'; kRunsFt.textContent = 'unavailable';
+        body.innerHTML = '<tr><td colspan="6" style="color:var(--error);padding:18px 14px;">'
+            + 'Could not load runs: ' + esc(e.message) + '</td></tr>';
+    }
+})();
+
+// --- Small self-contained module thumbnails (canvas) ---
+(() => {
+  const INK="#2C3A33", ACCENT="#1C6B54", AMBER="#B9722E", HAIR="#D8DCD5";
+  function ready(cv){const dpr=window.devicePixelRatio||1;const w=cv.width,h=cv.height;
+    cv.width=w*dpr;cv.height=h*dpr;cv.style.width=w+"px";cv.style.height=h+"px";
+    const c=cv.getContext("2d");c.scale(dpr,dpr);return c;}
+  const line=(c,a,b,x,y)=>{c.beginPath();c.moveTo(a,b);c.lineTo(x,y);c.stroke();};
+  function round(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);
+    c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+  function tree(c){c.clearRect(0,0,44,44);c.strokeStyle=INK;c.lineWidth=1.1;c.lineCap="round";
+    [9,16,24,31,38].forEach(y=>line(c,30,y,37,y));
+    line(c,23,9,30,9);line(c,23,16,30,16);line(c,23,9,23,16);line(c,18,12.5,23,12.5);
+    line(c,23,24,30,24);line(c,18,12.5,18,24);line(c,13,18,18,18);
+    line(c,25,31,30,31);line(c,25,38,30,38);line(c,25,31,25,38);line(c,13,34.5,25,34.5);
+    line(c,13,18,13,34.5);line(c,8,26,13,26);
+    [[37,9,ACCENT],[37,16,ACCENT],[37,24,AMBER],[37,31,ACCENT],[37,38,AMBER]]
+      .forEach(([x,y,col])=>{c.fillStyle=col;c.beginPath();c.arc(x,y,1.8,0,7);c.fill();});}
+  function heat(c){c.clearRect(0,0,44,44);const cols=5,rows=4,pad=7,gap=2;
+    const cw=(44-pad*2-gap*(cols-1))/cols,ch=(44-pad*2-gap*(rows-1))/rows;
+    const v=[[1,.7,0,.4,1],[.8,1,.2,0,.6],[0,.5,1,.9,0],[.6,0,.8,1,.3]];
+    for(let r=0;r<rows;r++)for(let k=0;k<cols;k++){const val=v[r][k];
+      c.fillStyle=val===0?"#EDEEE8":`rgba(28,107,84,${0.2+val*0.7})`;
+      round(c,pad+k*(cw+gap),pad+r*(ch+gap),cw,ch,1.2);c.fill();}}
+  function dom(c){c.clearRect(0,0,44,44);
+    const rows=[[[7,13,ACCENT],[23,9,AMBER]],[[7,10,AMBER],[20,15,ACCENT]],[[7,20,ACCENT]]];
+    [12,22,32].forEach((y,i)=>{c.strokeStyle=HAIR;c.lineWidth=1;line(c,6,y,38,y);
+      rows[i].forEach(([x,w,col])=>{c.fillStyle=col;round(c,x,y-3.5,w,7,2);c.fill();});});}
+  document.querySelectorAll("canvas[data-motif]").forEach(cv=>{
+    const c=ready(cv),m=cv.dataset.motif;
+    if(m==="tree")tree(c);else if(m==="heatmap")heat(c);else dom(c);});
 })();
 </script>
 

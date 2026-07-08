@@ -9,16 +9,25 @@
 
 {% block content %}
 
-<!-- Sub-tab navigation -->
-<div style="display:flex;gap:0;margin-bottom:24px;border-bottom:2px solid var(--border);">
-  <button class="section-tab-btn active" onclick="switchSection('pa')"
-    style="padding:10px 20px;background:none;border:none;border-bottom:3px solid var(--primary);margin-bottom:-2px;font-weight:600;cursor:pointer;color:var(--primary);">
-    Domain Presence / Absence
-  </button>
-  <button class="section-tab-btn" onclick="switchSection('hr')"
-    style="padding:10px 20px;background:none;border:none;border-bottom:3px solid transparent;margin-bottom:-2px;font-weight:600;cursor:pointer;color:var(--text-muted);">
-    High Resolution Phylogenetic Profiling
-  </button>
+<style>
+  /* Continuous profiling flow — stage headers + step divider (self-contained) */
+  .stage-head { display:flex; gap:12px; align-items:flex-start; margin-bottom:20px; }
+  .stage-num { flex:none; width:28px; height:28px; border-radius:50%; background:var(--primary);
+    color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center; }
+  .stage-title { margin:0; font-size:18px; }
+  .stage-sub { margin:2px 0 0; color:var(--text-muted); font-size:13px; }
+  .stage-divider { border:none; border-top:1px solid var(--border); margin:32px 0; }
+  .continue-bar { display:flex; align-items:center; gap:12px; margin-top:22px; flex-wrap:wrap; }
+  .continue-bar .hint { color:var(--text-muted); font-size:13px; }
+</style>
+
+<!-- Continuous flow: Stage 1 (Presence / Absence) → Stage 2 (High-Resolution) -->
+<div class="stage-head">
+  <span class="stage-num">1</span>
+  <div>
+    <h2 class="stage-title">Domain Presence / Absence</h2>
+    <p class="stage-sub">Build a domain presence/absence matrix across taxa. Continue to high-resolution profiling when ready.</p>
+  </div>
 </div>
 
 <!-- ================================================================
@@ -157,6 +166,14 @@
   </div>
 </div>
 
+<!-- Continue to Stage 2 — carries the typed selections forward -->
+<div class="continue-bar">
+  <button class="btn btn-primary" id="pa-continue-btn" onclick="continueToHighRes()">
+    Continue to High-Resolution Profiling →
+  </button>
+  <span class="hint">Carries your version, Pfam, and taxonomy selections into the high-resolution step.</span>
+</div>
+
 </div><!-- end #section-pa -->
 
 
@@ -164,6 +181,15 @@
      SECTION 2: HIGH RESOLUTION PHYLOGENETIC PROFILING
      ================================================================ -->
 <div id="section-hr" style="display:none;">
+
+<hr class="stage-divider">
+<div class="stage-head">
+  <span class="stage-num">2</span>
+  <div>
+    <h2 class="stage-title">High-Resolution Phylogenetic Profiling</h2>
+    <p class="stage-sub">Build gene trees, partition them into subclades, and assemble a high-resolution profile.</p>
+  </div>
+</div>
 
 <!-- Step indicators -->
 <div class="steps" id="step-bar">
@@ -464,17 +490,25 @@
 
 <script>
 // ================================================================
-// Sub-tab switching
+// Continuous flow: Presence/Absence -> High-Resolution
+// Reveals Stage 2 and carries the already-typed selections down,
+// so the two analyses run as one continuous pipeline.
 // ================================================================
-function switchSection(which) {
-    document.getElementById('section-pa').style.display = which === 'pa' ? '' : 'none';
-    document.getElementById('section-hr').style.display = which === 'hr' ? '' : 'none';
-    document.querySelectorAll('.section-tab-btn').forEach((btn, i) => {
-        const active = (i === 0 && which === 'pa') || (i === 1 && which === 'hr');
-        btn.style.borderBottomColor = active ? 'var(--primary)' : 'transparent';
-        btn.style.color = active ? 'var(--primary)' : 'var(--text-muted)';
-        btn.style.fontWeight = active ? '600' : '600';
-    });
+function continueToHighRes() {
+    // Carry shared inputs forward (only when the user actually typed them)
+    const ver  = document.getElementById('pa-ver').value.trim();
+    const pfam = document.getElementById('pa-pfam-input').value.trim();
+    const tax  = document.getElementById('pa-taxids').value.trim();
+    if (ver)  document.getElementById('ver').value      = ver;
+    if (pfam) document.getElementById('pfam-text').value = pfam;
+    if (tax)  document.getElementById('taxids').value    = tax;
+    if (document.getElementById('pa-use-evalue').checked) {
+        document.getElementById('evalue').value = document.getElementById('pa-evalue').value.trim();
+    }
+    // Reveal Stage 2 below and scroll to it
+    const hr = document.getElementById('section-hr');
+    hr.style.display = '';
+    hr.scrollIntoView({ behavior: 'smooth' });
 }
 
 // ================================================================
@@ -946,9 +980,19 @@ function onModeChange(pfam) {
 }
 
 async function previewPartition(pfam) {
-    const payload = buildPartitionPayload(pfam);
-    if (!payload) return;
+    // Preview button: compute and show the partition (result is also cached).
+    await computePartition(pfam);
+}
 
+// Compute the partition from the current inputs, render the preview box, and
+// RETURN the parts object (or null on failure). Locking reuses this, so a
+// partition can be locked whether or not Preview was clicked first — this is
+// what makes node-path / auto-duplication locking reliable.
+async function computePartition(pfam) {
+    const payload = buildPartitionPayload(pfam);
+    if (!payload) return null;
+
+    const preview = document.getElementById(`partition-preview-${pfam}`);
     try {
         const res  = await fetch('/api/highres/partition', {
             method: 'POST',
@@ -956,37 +1000,44 @@ async function previewPartition(pfam) {
             body: JSON.stringify({ job_id: hrState.jobId, pfam, ...payload }),
         });
         const data = await res.json();
-        const preview = document.getElementById(`partition-preview-${pfam}`);
+
         if (data.error) {
             preview.innerHTML = `<span class="text-muted">${data.error}</span>`;
-        } else {
-            const rows = data.summary.map(s => ({
-                Subclade: s.label,
-                'Leaves': s.n_leaves,
-                'Sample': s.sample.join(', ') + (s.n_leaves > 3 ? ' …' : ''),
-            }));
-            preview.innerHTML = `<div class="label">Preview (${data.summary.length} subclades)</div>` + makeTable(rows, ['Subclade','Leaves','Sample']);
-            preview.dataset.parts = JSON.stringify(data.parts);
+            preview.dataset.parts = '';
+            showEl(`partition-preview-${pfam}`);
+            return null;
         }
+
+        const rows = data.summary.map(s => ({
+            Subclade: s.label,
+            'Leaves': s.n_leaves,
+            'Sample': s.sample.join(', ') + (s.n_leaves > 3 ? ' …' : ''),
+        }));
+        preview.innerHTML = `<div class="label">Preview (${data.summary.length} subclades)</div>` + makeTable(rows, ['Subclade','Leaves','Sample']);
+        preview.dataset.parts = JSON.stringify(data.parts);
         showEl(`partition-preview-${pfam}`);
+        return data.parts || {};
     } catch (e) {
-        showAlert('build-alert', 'error', e.message);
+        preview.innerHTML = `<span class="text-muted">${e.message}</span>`;
+        preview.dataset.parts = '';
+        showEl(`partition-preview-${pfam}`);
+        return null;
     }
 }
 
 async function lockPartition(pfam) {
-    const preview = document.getElementById(`partition-preview-${pfam}`);
-    if (!preview.dataset.parts) {
-        await previewPartition(pfam);
-        const p2 = document.getElementById(`partition-preview-${pfam}`);
-        if (!p2.dataset.parts) return;
-        hrState.partitions[pfam] = JSON.parse(p2.dataset.parts);
-    } else {
-        hrState.partitions[pfam] = JSON.parse(preview.dataset.parts);
+    // Always (re)compute from the current inputs so locking is reliable for
+    // every mode — no dependency on having clicked Preview first.
+    const parts = await computePartition(pfam);
+    if (!parts || Object.keys(parts).length === 0) {
+        showAlert('build-alert', 'error',
+            `Could not lock ${pfam}: no subclades were produced. Check your selection (node paths / taxon) and try Preview.`);
+        return;
     }
 
+    hrState.partitions[pfam] = parts;
     const badge = document.getElementById(`lock-badge-${pfam}`);
-    const n     = Object.keys(hrState.partitions[pfam]).length;
+    const n     = Object.keys(parts).length;
     badge.textContent = `Locked (${n} subclades)`;
     badge.className   = 'badge badge-green';
     updatePartitionStatus();
@@ -1366,5 +1417,35 @@ async function launchEteProfile() {
         showAlert('ete-alert', 'error', e.message);
     }
 }
+
+// ================================================================
+// Restore a previous high-res build when opened from Recent runs
+// (Overview → Profile). Reveals the high-res stage and jumps to the
+// partition step so the built trees are ready without rebuilding.
+// Works while the run is still loaded in memory (same app session).
+// ================================================================
+(function restoreFromJob() {
+    const jid = new URLSearchParams(location.search).get('job');
+    if (!jid) return;
+    const hr = document.getElementById('section-hr');
+    if (hr) hr.style.display = '';
+    fetch('/api/highres/job/' + encodeURIComponent(jid))
+        .then(r => r.json())
+        .then(data => {
+            if (data.error || data.status !== 'done' || !data.summary) {
+                showAlert('build-alert', 'info',
+                    'This run is no longer loaded in memory (the app was likely restarted). '
+                    + 'Re-run the build to partition it again.');
+                if (hr) hr.scrollIntoView({ behavior: 'smooth' });
+                return;
+            }
+            hrState.jobId   = jid;
+            hrState.summary = data.summary;
+            showStep2(data.summary);
+            const s2 = document.getElementById('step2-section');
+            if (s2) s2.scrollIntoView({ behavior: 'smooth' });
+        })
+        .catch(e => showAlert('build-alert', 'error', e.message));
+})();
 </script>
 {% endblock %}
