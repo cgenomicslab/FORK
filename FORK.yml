@@ -1,0 +1,60 @@
+name: bio_tools
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # Core Runtimes & Compilers
+  - python=3.11
+  - pip
+  - pyqt
+  - gcc_linux-64
+  - gxx_linux-64
+  - graphviz
+  - python-graphviz
+
+  # Data Science, Math & Plotting Stack
+  - altair=6.0.0
+  - arviz=0.23.4
+  - h5netcdf
+  - h5py
+  - hdf5
+  - matplotlib-base
+  - numba
+  - pandas
+  - pyarrow
+  - seaborn
+  - streamlit=1.57.0
+  - uvicorn
+  - xarray
+  - xarray-einstats
+
+  # Bioinformatics CLI Tools & Frameworks
+  - biopython=1.87
+  - clustalo=1.2.4
+  - fasttree=2.2.0
+  - iqtree=3.1.1
+  - trimal=1.5.1
+
+  # System/Database Support
+  - mysql-connector-python
+  - watchdog
+
+  # Pip-Specific Packages & Web Automation
+  - pip:
+      - ete4
+      - ete3==3.1.3
+      - itolapi==4.1.6
+      - pastml==1.9.42
+      - pymc==5.25.1
+      - pytensor==2.31.7
+      - treeprofiler==2.0.4
+      - cachetools==7.1.3
+      - numpy==1.26.4
+      - scipy==1.14.0
+      - multipledispatch==1.0.0
+      - pyvirtualdisplay==3.0
+      - selenium==4.44.0
+      - webdriver-manager==4.1.0
+      - requests==2.34.2
+      - trio==0.33.0
