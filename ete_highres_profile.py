@@ -243,6 +243,28 @@ print(
     f"Launching ETE profile viewer on port {args.port} with {len(taxids)} taxa, {len(columns)} columns."
 )
 
+# Ensure the tree has a drawable width — ETE4 SmartView raises "Cannot draw
+# tree with width 0" for topology-only / zero-length trees (e.g. an NCBI
+# taxonomy tree). Bump non-positive branches, then fall back to a uniform
+# dendrogram if the whole tree is still effectively zero-width.
+for _n in tree.traverse():
+    if _n.up is not None and (not _n.dist or _n.dist <= 0):
+        _n.dist = 1e-6
+
+
+def _root_dist(_leaf):
+    _d, _cur = 0.0, _leaf
+    while _cur.up is not None:
+        _d += _cur.dist or 0.0
+        _cur = _cur.up
+    return _d
+
+
+if max((_root_dist(_l) for _l in tree.leaves()), default=0.0) < 1e-5:
+    for _n in tree.traverse():
+        if _n.up is not None:
+            _n.dist = 1.0
+
 tree.explore(
     layouts=[base_layout, branch_layout, label_layout, hdr_layout, cnt_layout],
     port=args.port,

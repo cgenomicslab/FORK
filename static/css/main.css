@@ -774,6 +774,18 @@ table td {
 table tr:last-child td { border-bottom: none; }
 table tr:hover td { background: #f4f8fd; }
 
+/* Clickable internal-node list (High-Resolution → Node path mode) */
+.nodelist-table .nl-check {
+  width: 1.4em;
+  text-align: center;
+  color: var(--accent);
+  font-weight: 700;
+}
+.nodelist-row { cursor: pointer; }
+.nodelist-row.disabled { cursor: default; color: var(--text-light); }
+.nodelist-row.selected td { background: var(--accent-light); }
+.nodelist-row.selected:hover td { background: var(--accent-light); }
+
 /* =====================================================================
    IMAGES / RESULTS
    ===================================================================== */

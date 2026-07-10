@@ -202,6 +202,14 @@
     <!-- Alert area -->
     <div id="alert-area" class="hidden"></div>
 
+    <!-- Tree download (shown for any viewer mode once the tree is built) -->
+    <div id="tree-download-section" class="card hidden" style="margin-bottom:16px;">
+      <div class="download-bar">
+        <span class="label">Download:</span>
+        <button class="btn btn-secondary btn-sm" onclick="downloadFile('newick')" title="Download the built tree as a plain Newick file">Tree (Newick)</button>
+      </div>
+    </div>
+
     <!-- Static PNG tree -->
     <div id="tree-static-section" class="card hidden">
       <div class="card-header"><h2>Tree + Domain Architecture</h2></div>
@@ -260,7 +268,7 @@ async function runTree() {
     }
 
     // Clear previous results
-    ['tree-static-section','tree-ete4-section','rendered-png-section'].forEach(id => hideEl(id));
+    ['tree-download-section','tree-static-section','tree-ete4-section','rendered-png-section'].forEach(id => hideEl(id));
     clearAlert('alert-area');
     currentJobId = null;
     if (pollTimer) clearInterval(pollTimer);
@@ -371,6 +379,9 @@ function showJobError(msg) {
 
 function showResult(data) {
     const viewer = data.viewer;
+
+    // Newick download is available for any viewer mode once the tree is built.
+    if (data.has_newick) showEl('tree-download-section');
 
     if (viewer === 'ete4') {
         showEl('tree-ete4-section');

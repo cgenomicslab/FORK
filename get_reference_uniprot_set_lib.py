@@ -1009,6 +1009,35 @@ class UniProtRetriever:
 
         return all_results
 
+    def _taxon_names_by_ids(self, version, taxon_ids, chunk_size=5000):
+        """Return {taxon_id: scientific_name} for the given taxon_ids.
+
+        Used to label taxa that enter a profile only via an uploaded FASTA,
+        so they can still show an organism name if they exist in the
+        reference taxonomy. Taxa absent from the DB are simply omitted.
+        """
+        taxon_ids = [int(t) for t in set(taxon_ids)]
+        if not taxon_ids:
+            return {}
+        names = {}
+        try:
+            for i in range(0, len(taxon_ids), chunk_size):
+                chunk = taxon_ids[i : i + chunk_size]
+                placeholders = ", ".join(["%s"] * len(chunk))
+                query = f"""
+                    SELECT   taxon_id, MIN(organism) AS scientific_name
+                    FROM     proteins
+                    WHERE    version = %s
+                      AND    taxon_id IN ({placeholders})
+                    GROUP BY taxon_id
+                """
+                self.cursor.execute(query, tuple([version] + chunk))
+                for r in self.cursor.fetchall():
+                    names[r["taxon_id"]] = r["scientific_name"]
+        except mysql.connector.Error as err:
+            raise RuntimeError(f"Database query failed: {err}") from err
+        return names
+
     # High-resolution phylogenetic profile (gets the output of the subclade partition)
     def get_highres_profile(
         self,
@@ -1016,6 +1045,7 @@ class UniProtRetriever:
         pfam_subclade_map,
         taxon_ids=None,
         binary=False,
+        acc_to_taxon_override=None,
     ):
         """
         Build a high-resolution phylogenetic profile matrix.
@@ -1030,6 +1060,12 @@ class UniProtRetriever:
         - `missing_accessions` is not an error — common causes are
           (a) tree was built against a different UniProt version, or
           (b) the accession was renamed/removed between versions.
+
+        `acc_to_taxon_override` is an optional {accession: taxon_id} mapping
+        used as a fallback when an accession is absent from the DB — e.g. for
+        sequences supplied via an uploaded FASTA, whose taxon is carried in
+        the tree leaf name ("{taxid}.{accession}"). The DB lookup always wins;
+        the override only fills gaps, so DB-only behaviour is unchanged.
 
         """
         # 1. Flatten input --> set of every unique accession
@@ -1052,6 +1088,23 @@ class UniProtRetriever:
         rows = self.get_accessions_with_taxids(version, list(all_accessions))
         acc_to_taxon = {r["accession"]: r["taxon_id"] for r in rows}
         taxon_names = {r["taxon_id"]: r["scientific_name"] for r in rows}
+
+        # 2b. Fallback: fill in accessions absent from the DB (e.g. uploaded
+        # FASTA sequences) using the taxon carried in the tree leaf name.
+        if acc_to_taxon_override:
+            for acc, tx in acc_to_taxon_override.items():
+                if acc in all_accessions and acc not in acc_to_taxon:
+                    try:
+                        acc_to_taxon[acc] = int(tx)
+                    except (TypeError, ValueError):
+                        continue
+            # Best-effort scientific names for any taxa introduced this way
+            # that still lack one (present in the reference taxonomy but with
+            # no DB accession among the inputs).
+            unnamed = {tx for tx in acc_to_taxon.values() if tx not in taxon_names}
+            if unnamed:
+                for tx, nm in self._taxon_names_by_ids(version, list(unnamed)).items():
+                    taxon_names.setdefault(tx, nm)
 
         missing = all_accessions - set(acc_to_taxon.keys())
 
@@ -1506,6 +1559,7 @@ def fetch_highres_profile(
     taxon_ids=None,
     binary=False,
     db_config=None,
+    acc_to_taxon_override=None,
 ):
     """
     One-call helper: connect --> build high-res phylogenetic profile --> disconnect.
@@ -1517,6 +1571,7 @@ def fetch_highres_profile(
             pfam_subclade_map=pfam_subclade_map,
             taxon_ids=taxon_ids,
             binary=binary,
+            acc_to_taxon_override=acc_to_taxon_override,
         )
 
 

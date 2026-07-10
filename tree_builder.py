@@ -99,11 +99,16 @@ def cache_key(
     aln: str,
     ml: str,
     gt: str,
+    local_fasta_hash: Optional[str] = None,
 ) -> str:
     """
     Short ID for one tree-build configuration. Identical
     inputs always produce the same key - changing any parameter produces
     a different key.
+
+    For entries built from an uploaded FASTA (rather than the DB), a hash of
+    the file content is folded in so that re-uploading a *different* FASTA
+    under the same label rebuilds instead of reusing a stale cached tree.
     """
     params = {
         "pfam": pfam,
@@ -114,6 +119,7 @@ def cache_key(
         "aln": aln,
         "ml": ml,
         "gt": gt,
+        "local_fasta": local_fasta_hash,
     }
     blob = json.dumps(params, sort_keys=True).encode()
     return f"{pfam}_{hashlib.md5(blob).hexdigest()[:10]}"
@@ -165,12 +171,22 @@ def build_one_tree(
     python_exe: Optional[str] = None,
     force: bool = False,
     progress_callback: ProgressCb = None,
+    local_fasta: Optional[str] = None,
 ) -> dict:
     """
-    Build (or load from cache) the tree for ONE Pfam.
+    Build (or load from cache) the tree for ONE entry.
 
+    Normally the sequences are pulled from the reference DB by `pfam`. If
+    `local_fasta` is given, that file's sequences are used instead (headers
+    must be "{taxid}.{accession}") and `pfam` is treated as a display label.
     """
-    key = cache_key(pfam, taxids, exclude_taxids, version, evalue, aln, ml, gt)
+    local_fasta_hash = None
+    if local_fasta:
+        with open(local_fasta, "rb") as fh:
+            local_fasta_hash = hashlib.md5(fh.read()).hexdigest()
+    key = cache_key(
+        pfam, taxids, exclude_taxids, version, evalue, aln, ml, gt, local_fasta_hash
+    )
     cache_dir = Path(output_root) / key
     cache_dir.mkdir(parents=True, exist_ok=True)
     prefix = str(cache_dir / pfam)
@@ -220,6 +236,8 @@ def build_one_tree(
             cmd += ["--exclude_taxids", ",".join(str(t) for t in exclude_taxids)]
         if evalue is not None:
             cmd += ["--evalue", str(evalue)]
+        if local_fasta:
+            cmd += ["--local_fasta", local_fasta]
 
         proc = subprocess.run(cmd, capture_output=True, text=True)
         result["stderr"] = proc.stderr
@@ -272,26 +290,36 @@ def build_trees(
     output_root: str,
     version: str,
     progress_callback: ProgressCb = None,
+    local_fastas: Optional[Dict[str, str]] = None,
     **kwargs,
 ) -> Dict[str, dict]:
     """
-    Build trees for multiple Pfams (serial). Returns {pfam: result_dict}.
+    Build trees for multiple entries (serial). Returns {label: result_dict}.
+
+    `pfams` are built from the reference DB. `local_fastas` is an optional
+    {label: fasta_path} mapping — those entries are built from the uploaded
+    FASTA instead, and appear in the results alongside the DB Pfams so the
+    downstream partition/profile steps treat both uniformly.
     """
     results = {}
-    n = len(pfams)
-    for i, pfam in enumerate(pfams, 1):
+    entries = [(pfam, None) for pfam in pfams]
+    entries += [(label, path) for label, path in (local_fastas or {}).items()]
+    n = len(entries)
+    for i, (label, lf) in enumerate(entries, 1):
         if progress_callback:
-            progress_callback(f"({i}/{n}) starting {pfam}")
-        results[pfam] = build_one_tree(
-            pfam=pfam,
+            src = "local FASTA" if lf else "DB"
+            progress_callback(f"({i}/{n}) starting {label} ({src})")
+        results[label] = build_one_tree(
+            pfam=label,
             output_root=output_root,
             version=version,
             progress_callback=progress_callback,
+            local_fasta=lf,
             **kwargs,
         )
         if progress_callback:
-            r = results[pfam]
+            r = results[label]
             status = "OK" if r["error"] is None else f"ERROR: {r['error']}"
             tag = "(cached)" if r["cached"] and r["error"] is None else ""
-            progress_callback(f"({i}/{n}) finished {pfam} {tag} — {status}")
+            progress_callback(f"({i}/{n}) finished {label} {tag} — {status}")
     return results

@@ -230,12 +230,13 @@ def api_job(job_id):
         r = job["result"]
         out["viewer"] = r.get("viewer", "")
         out["prefix"] = r.get("prefix", "")
+        # Newick download is available in every viewer mode once built.
+        out["has_newick"] = bool(r.get("newick"))
         if r.get("viewer") == "ete4":
             out["port"] = r.get("port")
         elif r.get("viewer") == "ete4_static":
             out["img_available"] = os.path.isfile(r.get("img_path", ""))
         elif r.get("viewer") == "d3":
-            out["has_newick"] = bool(r.get("newick"))
             out["tree_base"] = r.get("tree_base", "")
             out["has_itol_colors"] = bool(r.get("itol_colors"))
             out["has_itol_domains"] = bool(r.get("itol_domains"))
@@ -356,6 +357,22 @@ def api_run_tree():
             env = os.environ.copy()
             env["QT_QPA_PLATFORM"] = "offscreen"
 
+            def _built_newick():
+                """Locate the built tree file; return (tree_path, newick|None).
+
+                Lets every viewer mode expose the plain Newick download, not
+                just the d3 path.
+                """
+                aln_ext = ".mft" if aln == "mafft" else f".{aln}"
+                trim_ext = f'.gt{trimal_th.replace(".", "")}'
+                base = (
+                    f"{prefix}{aln_ext}{trim_ext}.lg.fasttree"
+                    if ml == "fasttree"
+                    else f"{prefix}{aln_ext}{trim_ext}.treefile"
+                )
+                tp = os.path.join(output_dir, base) if output_dir else base
+                return (tp, Path(tp).read_text()) if os.path.isfile(tp) else (tp, None)
+
             if viewer == "ete4":
                 ete4_port = _find_free_port()
                 _ete4_ports.add(ete4_port)
@@ -404,6 +421,7 @@ def api_run_tree():
                         )
                     return
 
+                tree_path, newick = _built_newick()
                 with _job_lock:
                     _jobs[job_id].update(
                         {
@@ -412,6 +430,8 @@ def api_run_tree():
                                 "viewer": "ete4",
                                 "port": ete4_port,
                                 "prefix": prefix,
+                                "newick": newick,
+                                "tree_path": tree_path,
                             },
                         }
                     )
@@ -449,6 +469,7 @@ def api_run_tree():
                 if output_dir:
                     img_path = os.path.join(output_dir, img_path)
 
+                tree_path, newick = _built_newick()
                 with _job_lock:
                     _jobs[job_id].update(
                         {
@@ -457,6 +478,8 @@ def api_run_tree():
                                 "viewer": "ete4_static",
                                 "img_path": img_path,
                                 "prefix": prefix,
+                                "newick": newick,
+                                "tree_path": tree_path,
                             },
                         }
                     )
@@ -572,7 +595,7 @@ def api_download_tree(job_id, filetype):
     if not job or job["status"] != "done":
         return "Not ready", 404
     r = job["result"]
-    prefix = r.get("prefix", "tree")
+    prefix = os.path.basename(r.get("prefix", "tree")) or "tree"
 
     if filetype == "newick":
         return Response(
@@ -804,13 +827,64 @@ def api_highres_build_trees():
     taxids = parse_ids(tax_raw)
     exclude_taxids = parse_ids(excl_raw)
 
-    if not pfams:
-        return jsonify({"error": "At least one Pfam ID is required."}), 400
+    # Optional external FASTA — built into its own gene tree and combined with
+    # the DB Pfams in the downstream partition/profile steps. Headers must be
+    # "{taxid}.{accession}" so the profile can attribute each sequence to a
+    # taxon (the taxon lives in the tree leaf name, not the DB).
+    local_fastas = {}  # {label: temp_path}  — passed to the tree builder
+    local_fasta_texts = {}  # {label: raw text} — kept for the FASTA download
+    if "combine_fasta" in files and files["combine_fasta"].filename:
+        up = files["combine_fasta"]
+        raw_bytes = up.read()
+        fasta_text = raw_bytes.decode("utf-8", errors="replace")
+
+        headers = [
+            line[1:].strip().split()[0]
+            for line in fasta_text.splitlines()
+            if line.startswith(">") and line[1:].strip()
+        ]
+        if not headers:
+            return (
+                jsonify({"error": "Uploaded FASTA has no sequences (no '>' headers)."}),
+                400,
+            )
+        if not any(tb.parse_leaf_to_taxid(h) is not None for h in headers):
+            return (
+                jsonify(
+                    {
+                        "error": "FASTA headers must be '{taxid}.{accession}', "
+                        "e.g. '>9606.P04637'. None of the uploaded headers matched."
+                    }
+                ),
+                400,
+            )
+
+        # Label from the filename stem — filesystem-safe and distinct from Pfams.
+        stem = os.path.splitext(os.path.basename(up.filename))[0]
+        label = (
+            "".join(c if (c.isalnum() or c in "._-") else "_" for c in stem)[:60]
+            or "uploaded_fasta"
+        )
+        while label in seen:
+            label += "_fasta"
+        seen.add(label)
+
+        tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=".fa", delete=False)
+        tmp.write(raw_bytes)
+        tmp.close()
+        local_fastas[label] = tmp.name
+        local_fasta_texts[label] = fasta_text
+
+    if not pfams and not local_fastas:
+        return (
+            jsonify({"error": "Enter at least one Pfam ID or upload a FASTA file."}),
+            400,
+        )
 
     job_id = _new_job(
         "highres_trees",
         meta={
-            "pfam": ", ".join(pfams),
+            "pfam": ", ".join(pfams + list(local_fastas.keys())),
             "method": f"{aln} → {ml}",
             "output": output_root,
         },
@@ -838,6 +912,7 @@ def api_highres_build_trees():
                 cpu=cpu,
                 tree_from_db_path="tree_from_db.py",
                 progress_callback=cb,
+                local_fastas=local_fastas,
             )
 
             summary = {}
@@ -866,6 +941,7 @@ def api_highres_build_trees():
                             "version": ver,
                             "taxids": taxids,
                             "output_root": output_root,
+                            "local_fastas": local_fasta_texts,
                         },
                     }
                 )
@@ -889,6 +965,42 @@ def api_highres_job(job_id):
     if job["status"] == "done" and job["result"]:
         out["summary"] = job["result"]["summary"]
     return jsonify(out)
+
+
+@app.route("/api/highres/download-tree", methods=["POST"])
+def api_highres_download_tree():
+    """Return the plain Newick for one built gene tree (DB Pfam or FASTA entry)."""
+    data = request.json or {}
+    with _job_lock:
+        job = _jobs.get(data.get("job_id"))
+    if not job or job["status"] != "done":
+        return jsonify({"error": "Not ready"}), 404
+
+    pfam = data.get("pfam")
+    r = job["result"]["tree_objects"].get(pfam)
+    if not r:
+        return jsonify({"error": f"No tree for {pfam}"}), 404
+
+    # Prefer the raw tree-builder output (clean, standard Newick); fall back to
+    # writing the in-memory ete4 tree if the file is unavailable.
+    nwk = ""
+    tree_path = r.get("tree_path")
+    if tree_path and os.path.isfile(tree_path):
+        nwk = Path(tree_path).read_text().strip()
+    elif r.get("tree") is not None:
+        try:
+            nwk = r["tree"].write()
+        except Exception:
+            nwk = ""
+    if not nwk:
+        return jsonify({"error": "Tree file unavailable."}), 404
+
+    safe = "".join(c if (c.isalnum() or c in "._-") else "_" for c in str(pfam)) or "tree"
+    return Response(
+        nwk + "\n",
+        mimetype="text/plain",
+        headers={"Content-Disposition": f"attachment; filename={safe}.nwk"},
+    )
 
 
 @app.route("/api/highres/partition", methods=["POST"])
@@ -1053,6 +1165,17 @@ def api_highres_compute_profile():
         for pfam, subclades in partitions.items()
     }
 
+    # Map accession -> taxon from the leaf names ("{taxid}.{accession}"), so
+    # sequences absent from the DB (e.g. from an uploaded FASTA) are still
+    # attributed to their taxon instead of being dropped from the profile.
+    acc_to_taxon_override = {}
+    for subclades in partitions.values():
+        for leaves in subclades.values():
+            for leaf in leaves:
+                tx = tb.parse_leaf_to_taxid(leaf)
+                if tx is not None:
+                    acc_to_taxon_override[tb.parse_leaf_to_accession(leaf)] = tx
+
     try:
         config = _get_config()
         out = uni.fetch_highres_profile(
@@ -1061,6 +1184,7 @@ def api_highres_compute_profile():
             taxon_ids=taxids or None,
             binary=binary,
             db_config=config,
+            acc_to_taxon_override=acc_to_taxon_override,
         )
 
         matrix = out["matrix"]
@@ -1289,6 +1413,19 @@ def api_highres_download_fasta():
         for pfam, subclades in partitions.items()
     }
 
+    # Sequences from any uploaded FASTA(s), keyed by bare accession — used as a
+    # fallback for leaves that are not present in the DB.
+    local_by_acc = {}
+    for text in job["result"].get("local_fastas", {}).values():
+        cur = None
+        for line in text.splitlines():
+            if line.startswith(">"):
+                cur = line[1:].strip().split()[0] if line[1:].strip() else None
+                if cur:
+                    local_by_acc[tb.parse_leaf_to_accession(cur)] = [cur, ""]
+            elif cur:
+                local_by_acc[tb.parse_leaf_to_accession(cur)][1] += line.strip()
+
     try:
         config = _get_config()
         fasta_parts = []
@@ -1298,19 +1435,33 @@ def api_highres_download_fasta():
                 accs = sorted(accessions)
                 if not accs:
                     continue
-                records = uni.fetch_sequences_by_accession(ver, accs, db_config=config)
-                if not records:
-                    continue
-                with uni.UniProtRetriever(config) as db:
-                    fasta_block = db.to_fasta_string(records)
-                # Annotate each header with pfam + subclade label
-                annotated = []
-                for line in fasta_block.splitlines():
-                    if line.startswith(">"):
-                        annotated.append(f"{line} [pfam={pfam}|subclade={label}]")
-                    else:
-                        annotated.append(line)
-                fasta_parts.append("\n".join(annotated))
+                records = (
+                    uni.fetch_sequences_by_accession(ver, accs, db_config=config) or []
+                )
+                found = set()
+                if records:
+                    with uni.UniProtRetriever(config) as db:
+                        fasta_block = db.to_fasta_string(records)
+                    found = {r["accession"] for r in records}
+                    # Annotate each header with pfam + subclade label
+                    annotated = []
+                    for line in fasta_block.splitlines():
+                        if line.startswith(">"):
+                            annotated.append(f"{line} [pfam={pfam}|subclade={label}]")
+                        else:
+                            annotated.append(line)
+                    fasta_parts.append("\n".join(annotated))
+
+                # Fallback for accessions not in the DB (e.g. uploaded FASTA)
+                for acc in accs:
+                    if acc in found:
+                        continue
+                    hit = local_by_acc.get(acc)
+                    if hit:
+                        header, seq = hit
+                        fasta_parts.append(
+                            f">{header} [pfam={pfam}|subclade={label}]\n{seq}"
+                        )
 
         fasta_text = "\n".join(fasta_parts) + "\n"
         return Response(

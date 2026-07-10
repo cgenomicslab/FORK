@@ -1044,11 +1044,34 @@ if __name__ == "__main__":
                 attach_paths(t)
 
                 # ETE4 SmartView raises "Cannot draw tree with width 0" when
-                # any branch has dist=0 (e.g. polytomy-resolution nodes added
-                # by tree_builder.py). Replace zeros with a tiny value.
+                # the summed branch length is ~0 — either a single branch has
+                # dist=0 (e.g. polytomy-resolution nodes added by
+                # tree_builder.py) or the whole tree is effectively zero-width
+                # (identical / near-identical sequences, so every branch is 0).
+                # First replace non-positive branches with a tiny value...
                 for _n in t.traverse():
                     if _n.up is not None and (not _n.dist or _n.dist <= 0):
                         _n.dist = 1e-6
+
+                # ...then, if the tree is *still* effectively zero-width (all
+                # branches were zero and are now just the 1e-6 filler), fall
+                # back to a uniform-branch dendrogram so it always renders.
+                def _root_dist(_leaf):
+                    _d, _cur = 0.0, _leaf
+                    while _cur.up is not None:
+                        _d += _cur.dist or 0.0
+                        _cur = _cur.up
+                    return _d
+
+                _max_width = max((_root_dist(_l) for _l in t.leaves()), default=0.0)
+                if _max_width < 1e-5:
+                    print(
+                        "INFO--Tree has ~zero total branch length; drawing as a "
+                        "uniform dendrogram (topology only)."
+                    )
+                    for _n in t.traverse():
+                        if _n.up is not None:
+                            _n.dist = 1.0
 
                 t.explore(
                     layouts=[

@@ -42,6 +42,13 @@
             <textarea id="pfam-text" rows="3" placeholder="PF00041, PF00069&#10;PF00100"></textarea>
             <span class="hint">Comma or newline separated. One tree is built per entry.</span>
           </div>
+          <div class="form-group">
+            <label for="combine-fasta">External FASTA (optional)</label>
+            <input type="file" id="combine-fasta" class="file-input" accept=".fa,.fasta,.faa,.txt">
+            <span class="hint">Combined with the Pfams above as an extra gene tree.
+              Headers must be <code>{taxid}.{accession}</code>, e.g. <code>&gt;9606.P04637</code>.
+              You can supply Pfams, a FASTA, or both.</span>
+          </div>
         </div>
       </div>
 
@@ -261,9 +268,10 @@ function setStep(n) {
 }
 
 async function buildTrees() {
-    const pfamText = document.getElementById('pfam-text').value.trim();
-    if (!pfamText) {
-        showAlert('build-alert', 'error', 'Enter at least one Pfam ID.');
+    const pfamText  = document.getElementById('pfam-text').value.trim();
+    const fastaFile = document.getElementById('combine-fasta').files[0];
+    if (!pfamText && !fastaFile) {
+        showAlert('build-alert', 'error', 'Enter at least one Pfam ID or upload a FASTA file.');
         return;
     }
 
@@ -276,6 +284,7 @@ async function buildTrees() {
 
     const fd = new FormData();
     fd.append('pfams', pfamText);
+    if (fastaFile) fd.append('combine_fasta', fastaFile);
     fd.append('version', document.getElementById('ver').value.trim());
     fd.append('output_root', document.getElementById('output-root').value.trim());
     fd.append('aln', document.getElementById('aln').value);
@@ -440,7 +449,7 @@ function makePfamBlock(pfam, r) {
           <div id="nodelist-${pfam}" class="hidden" style="margin-bottom:10px;max-height:180px;overflow-y:auto;"></div>
           <div class="form-group">
             <label>Node paths (one per line, comma-separated indices)</label>
-            <textarea id="nodepath-text-${pfam}" rows="4" placeholder="# e.g.&#10;0,1&#10;1,0"></textarea>
+            <textarea id="nodepath-text-${pfam}" rows="4" placeholder="# e.g.&#10;0,1&#10;1,0" oninput="syncNodeListSelection('${pfam}')"></textarea>
           </div>
         </div>
 
@@ -451,6 +460,7 @@ function makePfamBlock(pfam, r) {
         <div class="flex gap-8" style="margin-top:12px;">
           <button class="btn btn-secondary btn-sm" onclick="previewPartition('${pfam}')">Preview</button>
           <button class="btn btn-primary btn-sm" id="lock-btn-${pfam}" onclick="lockPartition('${pfam}')">Use this partition</button>
+          <button class="btn btn-secondary btn-sm" style="margin-left:auto;" onclick="downloadTree('${pfam}')" title="Download this gene tree as a plain Newick file">Download Newick</button>
         </div>
 
         <!-- Tree preview expander -->
@@ -575,11 +585,83 @@ async function loadNodeList(pfam) {
         });
         const data = await res.json();
         if (data.nodes && data.nodes.length) {
-            container.innerHTML = makeTable(data.nodes, ['path','n_leaves','sample']);
+            container.innerHTML = renderNodeList(pfam, data.nodes);
+            // Attach click handlers directly (more robust than inline onclick).
+            container.querySelectorAll('.nodelist-row:not(.disabled)').forEach(row => {
+                row.addEventListener('click', () => toggleNodePath(pfam, row));
+            });
+            syncNodeListSelection(pfam);
         } else {
             container.innerHTML = '<p class="text-muted">No internal nodes found.</p>';
         }
         container.classList.remove('hidden');
+    } catch (e) {
+        showAlert('build-alert', 'error', e.message);
+    }
+}
+
+// Render the internal-node table with clickable rows. Clicking a row adds or
+// removes its node path from the textarea below — no copy-paste needed.
+function renderNodeList(pfam, nodes) {
+    let html = '<div class="hint" style="margin-bottom:6px;">Click a row to add or remove its node path.</div>';
+    html += '<div class="table-wrapper"><table class="nodelist-table"><thead><tr>' +
+            '<th></th><th>path</th><th>n_leaves</th><th>sample</th></tr></thead><tbody>';
+    nodes.forEach(n => {
+        const disabled = n.path === '';   // root node has no selectable path
+        html += `<tr class="nodelist-row${disabled ? ' disabled' : ''}" data-path="${n.path}">` +
+                `<td class="nl-check"></td>` +
+                `<td title="${n.path}">${n.path || '(root)'}</td>` +
+                `<td>${n.n_leaves}</td>` +
+                `<td title="${n.sample}">${n.sample}</td>` +
+                '</tr>';
+    });
+    html += '</tbody></table></div>';
+    return html;
+}
+
+// Add/remove a node path in the textarea, then refresh the row highlights.
+function toggleNodePath(pfam, rowEl) {
+    const path = rowEl.dataset.path;
+    if (!path) return;
+    const ta = document.getElementById(`nodepath-text-${pfam}`);
+    const lines = ta.value.split('\n');
+    const idx = lines.findIndex(l => l.trim() === path);
+    if (idx >= 0) lines.splice(idx, 1);
+    else lines.push(path);
+    ta.value = lines.filter(l => l.trim() !== '').join('\n');
+    syncNodeListSelection(pfam);
+}
+
+// Highlight node-list rows whose path is currently present in the textarea.
+function syncNodeListSelection(pfam) {
+    const ta = document.getElementById(`nodepath-text-${pfam}`);
+    if (!ta) return;
+    const selected = new Set(ta.value.split('\n').map(s => s.trim()).filter(Boolean));
+    document.querySelectorAll(`#nodelist-${pfam} .nodelist-row`).forEach(row => {
+        const on = selected.has(row.dataset.path);
+        row.classList.toggle('selected', on);
+        row.querySelector('.nl-check').textContent = on ? '✓' : '';
+    });
+}
+
+// Download one built gene tree as a plain, clean Newick file.
+async function downloadTree(pfam) {
+    if (!hrState.jobId) {
+        showAlert('build-alert', 'error', 'Build the trees first.');
+        return;
+    }
+    try {
+        const res = await fetch('/api/highres/download-tree', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: hrState.jobId, pfam }),
+        });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            showAlert('build-alert', 'error', e.error || 'Could not download tree.');
+            return;
+        }
+        downloadText(`${pfam}.nwk`, await res.text(), 'text/plain');
     } catch (e) {
         showAlert('build-alert', 'error', e.message);
     }
