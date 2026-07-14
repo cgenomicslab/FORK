@@ -172,7 +172,9 @@ The report gives you:
   ![comparative analysis protein drill-down and heatmap](figures/comparative_analysis_heatmap.png)
   
 - **Species tree coloured by group** — static PNG *and* the interactive ETE4 explorer (green = A only, amber = B only, blue = both; capped at 150 taxa).
-  ![comparative analysis species-tree](figures/comparative_analysis_tree.png)
+  ![comparative analysis species-tree](figures/comparative_analysis_ncbi_tree.png)
+  ![comparative analysis species-tree](figures/comparative_analysis_ete4_tree.png)
+
 
 ---
 
