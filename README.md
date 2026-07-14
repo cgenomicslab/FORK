@@ -15,7 +15,7 @@ Four main analysis modules, plus sequence/domain utilities:
 | **Phylogenetic Tree** | Fetch sequences by Pfam/taxon → align (MAFFT) → tree (FastTree/IQ-TREE) → interactive D3 viewer or ETE4 explorer with domain shapes; download the tree as plain Newick |
 | **Presence / Absence** | Taxa × Pfam profile heatmap; drill into any cell for sub-profiles or domain architecture breakdown |
 | **High-Res Profile** | Partition gene trees into subclade (paralog) groups — by depth, manual MRCA, node path, or automatic duplication — and profile each subclade separately across taxa; optionally combine the DB Pfams with an uploaded FASTA |
-| **Comparative** | "Concept check": find protein families present in one taxon group but absent in another (e.g. Mucorales vs Human) — tables (present-in-A-not-B, the reverse, shared), a heatmap, a group-coloured species tree, and protein-accession drill-down |
+| **Comparative Analysis** | "Concept check": find protein families present in one taxon group but absent in another (e.g. Mucorales vs Human) — tables (present-in-A-not-B, the reverse, shared), a heatmap, a group-coloured species tree, and protein-accession drill-down |
 | **Utilities** | Standard retrieval, HMM search, accession lookup, domain coordinates, GO→domain profiles, branch extraction |
 
 ---
