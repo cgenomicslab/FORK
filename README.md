@@ -165,9 +165,13 @@ Ask which protein families are present in one taxon group but absent in another 
 The report gives you:
 
 - **Present in A, absent in B**, the **reverse**, and **shared** — family tables (name, accession, type, taxa count, protein count), each downloadable as CSV.
+  ![comparative analysis results](figures/comparative_analysis_results.png)
+
 - **Protein drill-down** — click a family's protein count to list the actual accessions (accession · taxon · organism · best e-value).
 - **Heatmap** of the top differential families across the group-A taxa (capped at 60 taxa for readability).
+  ![comparative analysis protein drill-down and heatmap](figures/comparative_analysis_heatmap.png)
 - **Species tree coloured by group** — static PNG *and* the interactive ETE4 explorer (green = A only, amber = B only, blue = both; capped at 150 taxa).
+  ![comparative analysis species-tree](figures/comparative_analysis_tree.png)
 
 ---
 
