@@ -57,6 +57,9 @@ __all__ = [
     "fetch_sequences_by_accession",
     "fetch_domains_by_go",
     "fetch_presence_absence_matrix",
+    "fetch_families_for_taxa",
+    "fetch_db_taxa",
+    "fetch_family_accessions",
     "fetch_accessions_for_cell",
     "fetch_subprofile_hits",
     "fetch_domain_architectures",
@@ -582,6 +585,143 @@ class UniProtRetriever:
             row["scientific_name"] = taxon_name_map.get(row["taxon_id"])
 
         return rows
+
+    # ------------------------------------------------------------------
+    # Family inventory for a set of taxa  (comparative "concept check")
+    # ------------------------------------------------------------------
+
+    def get_families_for_taxa(
+        self,
+        version,
+        taxon_ids,
+        evalue_cutoff=None,
+        chunk_size=5000,
+    ):
+        """Distinct HMM/Pfam families present in the given taxa, with counts.
+
+        Returns a list of dicts:
+            {hmm_name, hmm_accession, hmm_type, n_taxa, n_proteins}
+
+        `n_taxa`     = number of distinct taxa (in the input set) carrying it.
+        `n_proteins` = number of distinct proteins carrying it.
+
+        Large taxid lists are chunked; because the chunks are disjoint taxon
+        sets, the per-chunk counts sum exactly (no double counting).
+        """
+        if not taxon_ids:
+            return []
+        taxon_ids = sorted({int(t) for t in taxon_ids})
+        evalue_clause = "AND h.full_evalue <= %s" if evalue_cutoff is not None else ""
+
+        agg = {}
+        try:
+            for i in range(0, len(taxon_ids), chunk_size):
+                chunk = taxon_ids[i : i + chunk_size]
+                placeholders = ", ".join(["%s"] * len(chunk))
+                query = f"""
+                    SELECT   h.hmm_name,
+                             h.hmm_accession,
+                             h.hmm_type,
+                             COUNT(DISTINCT h.taxon_id)  AS n_taxa,
+                             COUNT(DISTINCT h.accession)  AS n_proteins
+                    FROM     hmm_search_results h
+                    WHERE    h.version = %s
+                      {evalue_clause}
+                      AND    h.taxon_id IN ({placeholders})
+                    GROUP BY h.hmm_name, h.hmm_accession, h.hmm_type
+                """
+                params = [version]
+                if evalue_cutoff is not None:
+                    params.append(evalue_cutoff)
+                params.extend(chunk)
+                self.cursor.execute(query, tuple(params))
+                for r in self.cursor.fetchall():
+                    key = r["hmm_name"]
+                    if key in agg:
+                        agg[key]["n_taxa"] += r["n_taxa"]
+                        agg[key]["n_proteins"] += r["n_proteins"]
+                    else:
+                        agg[key] = dict(r)
+        except mysql.connector.Error as err:
+            raise RuntimeError(f"Database query failed: {err}") from err
+
+        return sorted(agg.values(), key=lambda r: r["n_taxa"], reverse=True)
+
+    def get_family_accessions(
+        self,
+        version,
+        hmm_name,
+        taxon_ids,
+        evalue_cutoff=None,
+        chunk_size=5000,
+    ):
+        """Protein accessions carrying `hmm_name` within the given taxa.
+
+        Drill-down for the comparative view: returns one row per distinct
+        (accession, taxon_id) as {accession, taxon_id, scientific_name,
+        best_evalue}. The distinct-accession count matches `n_proteins` from
+        `get_families_for_taxa` (an accession belongs to a single taxon).
+        """
+        if not taxon_ids:
+            return []
+        taxon_ids = sorted({int(t) for t in taxon_ids})
+        evalue_clause = "AND h.full_evalue <= %s" if evalue_cutoff is not None else ""
+
+        rows = []
+        try:
+            for i in range(0, len(taxon_ids), chunk_size):
+                chunk = taxon_ids[i : i + chunk_size]
+                placeholders = ", ".join(["%s"] * len(chunk))
+                query = f"""
+                    SELECT   h.accession,
+                             h.taxon_id,
+                             MIN(h.full_evalue) AS best_evalue
+                    FROM     hmm_search_results h
+                    WHERE    h.version = %s
+                      {evalue_clause}
+                      AND    h.hmm_name = %s
+                      AND    h.taxon_id IN ({placeholders})
+                    GROUP BY h.accession, h.taxon_id
+                """
+                params = [version]
+                if evalue_cutoff is not None:
+                    params.append(evalue_cutoff)
+                params.append(hmm_name)
+                params.extend(chunk)
+                self.cursor.execute(query, tuple(params))
+                rows.extend(self.cursor.fetchall())
+        except mysql.connector.Error as err:
+            raise RuntimeError(f"Database query failed: {err}") from err
+
+        names = self._taxon_names_by_ids(version, [r["taxon_id"] for r in rows])
+        for r in rows:
+            r["scientific_name"] = names.get(r["taxon_id"])
+        rows.sort(key=lambda r: (r["taxon_id"], r["accession"]))
+        return rows
+
+    def get_db_taxa(self, version, taxon_ids, chunk_size=5000):
+        """Subset of `taxon_ids` that actually have proteins in this version.
+
+        Lets the comparative view restrict a (possibly clade-expanded) taxon
+        set to the taxa the reference DB actually knows about.
+        """
+        if not taxon_ids:
+            return []
+        taxon_ids = sorted({int(t) for t in taxon_ids})
+        present = []
+        try:
+            for i in range(0, len(taxon_ids), chunk_size):
+                chunk = taxon_ids[i : i + chunk_size]
+                placeholders = ", ".join(["%s"] * len(chunk))
+                self.cursor.execute(
+                    f"SELECT DISTINCT taxon_id FROM proteins "
+                    f"WHERE version = %s AND taxon_id IN ({placeholders})",
+                    tuple([version] + chunk),
+                )
+                present.extend(r["taxon_id"] for r in self.cursor.fetchall())
+        except mysql.connector.Error as err:
+            raise RuntimeError(f"Database query failed: {err}") from err
+        return present
 
     # ------------------------------------------------------------------
     # Accession retrieval for one matrix cell  (Step 1 → Step 2 bridge)
@@ -1472,6 +1612,29 @@ def fetch_presence_absence_matrix(
             taxon_ids=taxon_ids,
             evalue_cutoff=evalue_cutoff,
         )
+
+
+def fetch_families_for_taxa(version, taxon_ids, evalue_cutoff=None, db_config=None):
+    """One-call helper: distinct HMM/Pfam families present in a set of taxa."""
+    config = db_config or get_db_config()
+    with UniProtRetriever(config) as db:
+        return db.get_families_for_taxa(version, taxon_ids, evalue_cutoff)
+
+
+def fetch_db_taxa(version, taxon_ids, db_config=None):
+    """One-call helper: the subset of taxon_ids present in the DB version."""
+    config = db_config or get_db_config()
+    with UniProtRetriever(config) as db:
+        return db.get_db_taxa(version, taxon_ids)
+
+
+def fetch_family_accessions(
+    version, hmm_name, taxon_ids, evalue_cutoff=None, db_config=None
+):
+    """One-call helper: accessions carrying `hmm_name` within a taxon set."""
+    config = db_config or get_db_config()
+    with UniProtRetriever(config) as db:
+        return db.get_family_accessions(version, hmm_name, taxon_ids, evalue_cutoff)
 
 
 def fetch_accessions_for_cell(

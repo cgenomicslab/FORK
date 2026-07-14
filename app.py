@@ -138,6 +138,11 @@ def about_page():
     return render_template("about.html")
 
 
+@app.route("/compare")
+def compare_page():
+    return render_template("compare.html")
+
+
 # ==============================================================================================================
 #                                           DB CONFIG
 # ==============================================================================================================
@@ -776,6 +781,403 @@ def api_draw_architecture():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ==============================================================================================================
+#                       COMPARATIVE  ("concept check": families in A but not B)
+# ==============================================================================================================
+
+# Group colours (accent green = A, amber = B, blue = both) — reused by the
+# static PNG and the interactive ETE4 species tree.
+_CMP_A_COLOR = "#1C6B54"
+_CMP_B_COLOR = "#B9722E"
+_CMP_BOTH_COLOR = "#1558A0"
+
+# Resolved group taxids from the last comparison, keyed by a short token, so the
+# tree endpoints can reuse them without round-tripping large taxid lists.
+_compare_groups = {}
+_MAX_TREE_TAXA = 150  # cap NCBI topology size so it stays renderable
+
+
+def _resolve_taxon_group(ids_text, tree_file):
+    """Return a set of species taxids for one comparison group.
+
+    Combines typed taxon/clade IDs (clades expanded to their descendant species
+    via NCBI taxonomy) with taxids parsed from an optional uploaded Newick tree
+    (leaf names "{taxid}.{accession}" or bare taxids).
+    """
+    # A fresh NCBITaxa() per call: its SQLite connection is NOT thread-safe, so
+    # a module-level instance silently fails when Flask serves the request on a
+    # worker thread — the clade then never expands (only the literal taxid is
+    # kept). Every other endpoint here creates a local instance for this reason.
+    ncbi = NCBITaxa()
+    taxids = set()
+    for tok in (ids_text or "").replace(",", " ").split():
+        try:
+            tid = int(tok)
+        except ValueError:
+            continue
+        taxids.add(tid)
+        try:
+            # intermediate_nodes=True is essential: reference proteomes are
+            # keyed to SPECIES taxids, which are often *internal* NCBI nodes
+            # (they have sequenced-strain children). Leaf-only expansion would
+            # miss them and wrongly report "no taxa in the database".
+            taxids.update(
+                int(d) for d in ncbi.get_descendant_taxa(tid, intermediate_nodes=True)
+            )
+        except Exception:
+            pass
+
+    if tree_file is not None and getattr(tree_file, "filename", ""):
+        from ete4 import PhyloTree
+
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".nwk") as tmp:
+                tmp.write(tree_file.read())
+                tmp_path = tmp.name
+            t = PhyloTree(tmp_path)
+            for leaf in t.leaves():
+                head = leaf.name.split(".")[0]
+                if head.isdigit():
+                    taxids.add(int(head))
+        except Exception:
+            pass
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    return taxids
+
+
+def _cap_group_taxa(a_db, b_db, cap=_MAX_TREE_TAXA):
+    """Down-sample two taxon groups to at most `cap` taxa, keeping both groups."""
+    a, b = set(a_db), set(b_db)
+    both = sorted(a & b)
+    only_a = sorted(a - b)
+    only_b = sorted(b - a)
+    if len(a | b) <= cap:
+        return only_a, only_b, both
+    per = max(1, (cap - len(both)) // 2)
+    return only_a[:per], only_b[:per], both[: max(0, cap - 2 * per)]
+
+
+def _group_colormap(only_a, only_b, both):
+    cmap = {}
+    for t in only_a:
+        cmap[str(t)] = _CMP_A_COLOR
+    for t in only_b:
+        cmap[str(t)] = _CMP_B_COLOR
+    for t in both:
+        cmap[str(t)] = _CMP_BOTH_COLOR
+    return cmap
+
+
+@app.route("/api/compare/families", methods=["POST"])
+def api_compare_families():
+    f = request.form
+    files = request.files
+    ver = f.get("version", "2026_01")
+    ev = f.get("evalue", "").strip()
+    evalue = float(ev) if ev else None
+
+    a_taxa = _resolve_taxon_group(f.get("group_a_ids", ""), files.get("group_a_tree"))
+    b_taxa = _resolve_taxon_group(f.get("group_b_ids", ""), files.get("group_b_tree"))
+    if not a_taxa or not b_taxa:
+        return (
+            jsonify(
+                {
+                    "error": "Provide taxa for both groups "
+                    "(taxon/clade IDs and/or an uploaded tree)."
+                }
+            ),
+            400,
+        )
+
+    try:
+        config = _get_config()
+        a_db = uni.fetch_db_taxa(ver, sorted(a_taxa), db_config=config)
+        b_db = uni.fetch_db_taxa(ver, sorted(b_taxa), db_config=config)
+        if not a_db or not b_db:
+            missing, n_resolved = ("A", len(a_taxa)) if not a_db else ("B", len(b_taxa))
+            return (
+                jsonify(
+                    {
+                        "error": f"No taxa from group {missing} are present in the "
+                        f"reference database for version {ver} "
+                        f"({n_resolved} taxa resolved from NCBI, 0 found in the DB). "
+                        f"The clade may not be covered by the loaded reference proteomes."
+                    }
+                ),
+                400,
+            )
+        fam_a = uni.fetch_families_for_taxa(ver, a_db, evalue, db_config=config)
+        fam_b = uni.fetch_families_for_taxa(ver, b_db, evalue, db_config=config)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    by_a = {r["hmm_name"]: r for r in fam_a}
+    by_b = {r["hmm_name"]: r for r in fam_b}
+    names_a, names_b = set(by_a), set(by_b)
+
+    a_not_b = sorted(
+        (by_a[n] for n in names_a - names_b),
+        key=lambda r: r["n_taxa"],
+        reverse=True,
+    )
+    b_not_a = sorted(
+        (by_b[n] for n in names_b - names_a),
+        key=lambda r: r["n_taxa"],
+        reverse=True,
+    )
+    shared = sorted(names_a & names_b)
+
+    def slim(rows):
+        return [
+            {
+                "hmm_name": r["hmm_name"],
+                "hmm_accession": r.get("hmm_accession"),
+                "hmm_type": r.get("hmm_type"),
+                "n_taxa": r["n_taxa"],
+                "n_proteins": r["n_proteins"],
+            }
+            for r in rows
+        ]
+
+    # Heatmap of the top A-not-B families across the group-A taxa
+    heatmap_b64 = None
+    heatmap_note = None
+    top_names = [r["hmm_name"] for r in a_not_b[:40]]
+    if top_names:
+        try:
+            import pandas as pd
+
+            pa_rows = uni.fetch_presence_absence_matrix(
+                ver, top_names, taxon_ids=a_db, evalue_cutoff=evalue, db_config=config
+            )
+            if pa_rows:
+                df = pd.DataFrame(pa_rows)
+                df["taxon_label"] = df.apply(
+                    lambda r: f"{r['taxon_id']} · {r.get('scientific_name') or ''}".strip(
+                        " ·"
+                    ),
+                    axis=1,
+                )
+                matrix = df.pivot_table(
+                    index="taxon_label",
+                    columns="hmm_name",
+                    values="protein_count",
+                    aggfunc="sum",
+                    fill_value=0,
+                )
+                # Cap the number of taxa (rows): a clade can expand to thousands
+                # of taxa, and a several-thousand-row clustermap produces a PNG
+                # too large for the browser to render (it shows as a broken
+                # image). Keep the most informative rows — the taxa carrying the
+                # most of these differential families.
+                _MAX_HEATMAP_ROWS = 60
+                if matrix.shape[0] > _MAX_HEATMAP_ROWS:
+                    keep = (
+                        matrix.sum(axis=1)
+                        .sort_values(ascending=False)
+                        .index[:_MAX_HEATMAP_ROWS]
+                    )
+                    heatmap_note = (
+                        f"Showing the {_MAX_HEATMAP_ROWS} taxa carrying the most of "
+                        f"these families (of {matrix.shape[0]} group-A taxa)."
+                    )
+                    matrix = matrix.loc[keep]
+                if matrix.shape[0] >= 2 and matrix.shape[1] >= 1:
+                    buf = viz.draw_presence_absence_heatmap(
+                        matrix,
+                        title="Families in A but not B — across group-A taxa",
+                        cluster=(matrix.shape[0] >= 2 and matrix.shape[1] >= 2),
+                    )
+                    buf.seek(0)
+                    heatmap_b64 = base64.b64encode(buf.read()).decode()
+        except Exception:
+            heatmap_b64 = None
+
+    # Stash resolved DB taxa for the tree + drill-down endpoints
+    token = uuid.uuid4().hex[:12]
+    _compare_groups[token] = {
+        "a": list(a_db),
+        "b": list(b_db),
+        "version": ver,
+        "evalue": evalue,
+    }
+
+    return jsonify(
+        {
+            "token": token,
+            "group_a": {"n_taxa_query": len(a_taxa), "n_taxa_db": len(a_db), "n_families": len(names_a)},
+            "group_b": {"n_taxa_query": len(b_taxa), "n_taxa_db": len(b_db), "n_families": len(names_b)},
+            "a_not_b": slim(a_not_b),
+            "b_not_a": slim(b_not_a),
+            "n_shared": len(shared),
+            "shared_sample": shared[:60],
+            "heatmap": heatmap_b64,
+            "heatmap_note": heatmap_note,
+        }
+    )
+
+
+@app.route("/api/compare/family-proteins", methods=["POST"])
+def api_compare_family_proteins():
+    """Drill-down: the protein accessions carrying one family within a group."""
+    data = request.json or {}
+    grp = _compare_groups.get(data.get("token"))
+    if not grp:
+        return jsonify({"error": "Run the comparison first."}), 400
+
+    hmm_name = data.get("hmm_name")
+    which = data.get("which", "a")
+    taxids = grp["a"] if which == "a" else grp["b"]
+    if not hmm_name or not taxids:
+        return jsonify({"error": "Missing family or group."}), 400
+
+    try:
+        config = _get_config()
+        rows = uni.fetch_family_accessions(
+            grp["version"], hmm_name, taxids, grp.get("evalue"), db_config=config
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify(
+        {"hmm_name": hmm_name, "which": which, "count": len(rows), "accessions": rows}
+    )
+
+
+@app.route("/api/compare/species-tree", methods=["POST"])
+def api_compare_species_tree():
+    data = request.json or {}
+    grp = _compare_groups.get(data.get("token"))
+    if not grp:
+        return jsonify({"error": "Run the comparison first."}), 400
+
+    only_a, only_b, both = _cap_group_taxa(grp["a"], grp["b"])
+    cmap = _group_colormap(only_a, only_b, both)
+    all_taxids = [str(t) for t in (only_a + only_b + both)]
+    if len(all_taxids) < 2:
+        return jsonify({"error": "Not enough taxa to draw a tree."}), 400
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    try:
+        from ete4 import NCBITaxa
+        from ete4.treeview import TreeStyle, NodeStyle, TextFace as TVTextFace
+
+        ncbi = NCBITaxa()
+        sp_tree = ncbi.get_topology(all_taxids, intermediate_nodes=False)
+        for n in sp_tree.traverse():
+            n.dist = 0.0
+        sp_tree.to_ultrametric(topological=True)
+        sp_tree.annotate_ncbi_taxa(taxid_attr="name")
+
+        for node in sp_tree.traverse():
+            ns = NodeStyle()
+            ns["hz_line_width"] = 4
+            ns["vt_line_width"] = 4
+            ns["size"] = 0
+            if node.is_leaf:
+                col = cmap.get(node.name)
+            else:
+                leaf_cols = {cmap.get(l.name) for l in node.leaves()}
+                col = next(iter(leaf_cols)) if len(leaf_cols) == 1 else None
+            if col:
+                ns["hz_line_color"] = col
+                ns["vt_line_color"] = col
+            node.set_style(ns)
+            if node.is_leaf:
+                label = node.props.get("sci_name", node.name)
+                node.add_face(
+                    TVTextFace(f"  {label} ({node.name})"),
+                    column=0,
+                    position="branch-right",
+                )
+
+        ts = TreeStyle()
+        ts.show_leaf_name = False
+
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp_path = tmp.name
+        sp_tree.render(tmp_path, w=2000, units="px", tree_style=ts)
+        b64 = base64.b64encode(Path(tmp_path).read_bytes()).decode()
+        os.unlink(tmp_path)
+
+        return jsonify(
+            {
+                "png": b64,
+                "n_taxa": len(all_taxids),
+                "legend": {
+                    "A only": _CMP_A_COLOR,
+                    "B only": _CMP_B_COLOR,
+                    "both": _CMP_BOTH_COLOR,
+                },
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/compare/ete-tree", methods=["POST"])
+def api_compare_ete_tree():
+    data = request.json or {}
+    grp = _compare_groups.get(data.get("token"))
+    if not grp:
+        return jsonify({"error": "Run the comparison first."}), 400
+
+    only_a, only_b, both = _cap_group_taxa(grp["a"], grp["b"])
+    cmap = _group_colormap(only_a, only_b, both)
+    all_taxids = [str(t) for t in (only_a + only_b + both)]
+    if len(all_taxids) < 2:
+        return jsonify({"error": "Not enough taxa to draw a tree."}), 400
+
+    try:
+        port = _find_free_port()
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
+
+    tax_tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".taxids.txt", delete=False)
+    tax_tmp.write("\n".join(all_taxids))
+    tax_tmp.close()
+
+    cmap_tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".colormap.txt", delete=False)
+    cmap_tmp.write("\n".join(f"{tid}\t{col}" for tid, col in cmap.items()))
+    cmap_tmp.close()
+
+    cmd = [
+        sys.executable,
+        "ete_species_tree.py",
+        "-t",
+        tax_tmp.name,
+        "-c",
+        cmap_tmp.name,
+        "-p",
+        str(port),
+    ]
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    os.system(f"fuser -k {port}/tcp >/dev/null 2>&1")
+    proc = subprocess.Popen(cmd, env=env)
+
+    deadline = time.time() + 120
+    connected = False
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("localhost", port), timeout=2):
+                connected = True
+                break
+        except OSError:
+            time.sleep(3)
+
+    if not connected:
+        proc.kill()
+        return jsonify({"error": "ETE species tree did not start in time."}), 500
+
+    _ete4_ports.add(port)
+    return jsonify({"ok": True, "port": port, "pid": proc.pid})
 
 
 # ==============================================================================================================
@@ -1789,7 +2191,9 @@ def ete4_gui():
   // doesn't flag it as an unknown parameter and show the Swal warning.
   (function(){{
     var p = new URLSearchParams(location.search);
+    window.__fork_pfam = p.get('pfam') || '';
     p.delete('port');
+    p.delete('pfam');
     var qs = p.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
   }})();
@@ -1820,6 +2224,16 @@ def ete4_gui():
 @app.route("/ete4/<int:port>/static/<path:path>")
 def ete4_static_proxy(port, path):
     """Forward ETE4 static file requests (JS, CSS, images) to the ETE4 bottle server."""
+    # Serve our customised context menu from the repo instead of the read-only
+    # copy in the conda env. Same URL path, so its relative imports still work.
+    if path == "js/contextmenu.js":
+        override = os.path.join(
+            app.root_path, "static", "ete4_overrides", "contextmenu.js"
+        )
+        if os.path.isfile(override):
+            return Response(
+                Path(override).read_text(), content_type="application/javascript"
+            )
     try:
         resp = _req.get(f"http://127.0.0.1:{port}/static/{path}", timeout=10)
     except Exception:

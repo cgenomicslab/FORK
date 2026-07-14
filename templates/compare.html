@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+
+{% block title %}Comparative — FORK{% endblock %}
+
+{% block page_header %}
+<h1>Comparative Analysis</h1>
+<p>Concept check: find protein families present in one taxon group but absent in another (e.g. Mucorales vs Human), with tables, a heatmap, and the coloured species tree.</p>
+{% endblock %}
+
+{% block content %}
+
+<div class="analysis-layout">
+
+  <!-- Left: inputs -->
+  <div class="panel-left">
+
+    <div class="form-section">
+      <div class="form-section-header">Settings</div>
+      <div class="form-section-body">
+        <div class="form-group">
+          <label for="cmp-ver">UniProt Version</label>
+          <input type="text" id="cmp-ver" value="2026_01">
+        </div>
+        <div class="form-group">
+          <label class="checkbox-item">
+            <input type="checkbox" id="cmp-use-evalue"> Apply E-value cutoff
+          </label>
+          <input type="number" id="cmp-evalue" value="1e-5" step="any" class="hidden" style="margin-top:6px;">
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-header" style="color:var(--accent);">Group A — “present in”</div>
+      <div class="form-section-body">
+        <div class="form-group">
+          <label for="cmp-a-ids">Taxon / clade IDs</label>
+          <input type="text" id="cmp-a-ids" placeholder="e.g. 4827 (Mucorales)">
+          <span class="hint">Comma separated. A clade ID is expanded to its member species.</span>
+        </div>
+        <div class="form-group">
+          <label for="cmp-a-tree">…or derive taxa from a tree (optional)</label>
+          <input type="file" id="cmp-a-tree" class="file-input" accept=".nwk,.txt,.tree,.treefile">
+          <span class="hint">Newick; leaf taxa (from <code>{taxid}.{accession}</code>) are added to this group.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-header" style="color:var(--warning);">Group B — “absent in”</div>
+      <div class="form-section-body">
+        <div class="form-group">
+          <label for="cmp-b-ids">Taxon / clade IDs</label>
+          <input type="text" id="cmp-b-ids" placeholder="e.g. 9606 (Human)">
+          <span class="hint">Comma separated. A clade ID is expanded to its member species.</span>
+        </div>
+        <div class="form-group">
+          <label for="cmp-b-tree">…or derive taxa from a tree (optional)</label>
+          <input type="file" id="cmp-b-tree" class="file-input" accept=".nwk,.txt,.tree,.treefile">
+        </div>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-run" id="cmp-run-btn" onclick="runComparison()">Compare</button>
+    <div id="cmp-alert" class="hidden" style="margin-top:10px;"></div>
+  </div>
+
+  <!-- Right: results -->
+  <div class="panel-right">
+
+    <div id="cmp-loading" class="hidden">
+      <div class="status-panel">
+        <div class="status-header">
+          <div class="status-dot running"></div>
+          <span id="cmp-loading-text">Comparing groups…</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="cmp-results" class="hidden">
+
+      <!-- Summary -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header"><h2>Summary</h2></div>
+        <div class="card-body">
+          <div id="cmp-summary"></div>
+        </div>
+      </div>
+
+      <!-- Families present in A but not B -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header">
+          <h2 id="cmp-anb-title">Present in A, absent in B</h2>
+          <button class="btn btn-secondary btn-sm" id="cmp-dl-anb" onclick="downloadCompare('a_not_b')">Download CSV</button>
+        </div>
+        <div class="card-body">
+          <p class="text-muted text-sm" style="margin-bottom:10px;">Families found in group A but in none of group B, ranked by number of group-A taxa carrying them. <strong>Click a protein count to list the accessions.</strong></p>
+          <div id="cmp-anb-table"></div>
+        </div>
+      </div>
+
+      <!-- Drill-down: protein accessions for a clicked family count -->
+      <div id="cmp-family-drill" class="card hidden" style="margin-bottom:16px;">
+        <div class="card-header">
+          <h2 id="cmp-family-drill-title">Proteins</h2>
+          <div class="flex gap-8">
+            <button class="btn btn-secondary btn-sm" onclick="downloadFamilyProteins()">Download CSV</button>
+            <button class="btn btn-secondary btn-sm" onclick="hideEl('cmp-family-drill')">Close</button>
+          </div>
+        </div>
+        <div class="card-body"><div id="cmp-family-drill-body"></div></div>
+      </div>
+
+      <!-- Heatmap -->
+      <div id="cmp-heatmap-card" class="card hidden" style="margin-bottom:16px;">
+        <div class="card-header">
+          <h2>Heatmap — top differential families</h2>
+          <button class="btn btn-secondary btn-sm" onclick="downloadCompareHeatmap()">Download PNG</button>
+        </div>
+        <div class="card-body">
+          <div id="cmp-heatmap-note" class="text-muted text-sm hidden" style="margin-bottom:8px;"></div>
+          <div id="cmp-heatmap-img"></div>
+        </div>
+      </div>
+
+      <!-- Species tree -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header">
+          <h2>Species tree (coloured by group)</h2>
+        </div>
+        <div class="card-body">
+          <p class="text-muted text-sm" style="margin-bottom:10px;">
+            <span style="color:var(--accent);font-weight:600;">■ A only</span> &nbsp;
+            <span style="color:var(--warning);font-weight:600;">■ B only</span> &nbsp;
+            <span style="color:var(--info);font-weight:600;">■ both</span>
+            &nbsp;— capped at 150 taxa for readability.
+          </p>
+          <div class="flex gap-8" style="margin-bottom:10px;">
+            <button class="btn btn-secondary btn-sm" id="cmp-sptree-btn" onclick="renderCompareTree()">Render species tree (PNG)</button>
+            <button class="btn btn-secondary btn-sm" id="cmp-ete-btn" onclick="openCompareEteTree()">Open interactive ETE4</button>
+          </div>
+          <div id="cmp-sptree-alert" class="hidden" style="margin-bottom:8px;"></div>
+          <div id="cmp-sptree-img" style="margin-bottom:10px;"></div>
+          <div id="cmp-ete-viewer" class="hidden"></div>
+        </div>
+      </div>
+
+      <!-- Reverse + shared -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header">
+          <h2 id="cmp-bna-title">Present in B, absent in A</h2>
+          <button class="btn btn-secondary btn-sm" id="cmp-dl-bna" onclick="downloadCompare('b_not_a')">Download CSV</button>
+        </div>
+        <div class="card-body">
+          <div id="cmp-bna-table"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h2 id="cmp-shared-title">Shared families</h2></div>
+        <div class="card-body">
+          <div id="cmp-shared" class="text-muted text-sm"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  let cmpState = { token: null, a_not_b: [], b_not_a: [], heatmap: null, drill: null };
+
+  // Family table with a clickable n_proteins count (drills down to accessions).
+  function renderFamilyTable(rows, which) {
+    if (!rows || !rows.length) return '<p class="text-muted">None.</p>';
+    let html = '<div class="table-wrapper"><table><thead><tr>' +
+      '<th>hmm_name</th><th>hmm_accession</th><th>hmm_type</th><th>n_taxa</th><th>n_proteins</th>' +
+      '</tr></thead><tbody>';
+    rows.forEach(r => {
+      html += '<tr>' +
+        `<td title="${r.hmm_name}">${r.hmm_name}</td>` +
+        `<td>${r.hmm_accession ?? ''}</td>` +
+        `<td>${r.hmm_type ?? ''}</td>` +
+        `<td>${r.n_taxa}</td>` +
+        `<td><a href="#" class="cmp-nprot" data-hmm="${r.hmm_name}" data-which="${which}" ` +
+        `title="List the ${r.n_proteins} protein accessions">${r.n_proteins}</a></td>` +
+        '</tr>';
+    });
+    return html + '</tbody></table></div>';
+  }
+
+  // Delegated: clicking an n_proteins link lists that family's accessions.
+  document.addEventListener('click', function (e) {
+    const a = e.target.closest('.cmp-nprot');
+    if (!a) return;
+    e.preventDefault();
+    showFamilyProteins(a.dataset.hmm, a.dataset.which);
+  });
+
+  async function showFamilyProteins(hmm, which) {
+    if (!cmpState.token) return;
+    const body = document.getElementById('cmp-family-drill-body');
+    document.getElementById('cmp-family-drill-title').textContent =
+      `Proteins carrying ${hmm} — group ${which.toUpperCase()}`;
+    body.innerHTML = '<p class="text-muted">Loading…</p>';
+    showEl('cmp-family-drill');
+    document.getElementById('cmp-family-drill').scrollIntoView({ behavior: 'smooth' });
+    try {
+      const res = await fetch('/api/compare/family-proteins', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: cmpState.token, hmm_name: hmm, which }),
+      });
+      const data = await res.json();
+      if (data.error) { body.innerHTML = `<p class="text-muted">${data.error}</p>`; return; }
+      cmpState.drill = { hmm, rows: data.accessions };
+      const cols = ['accession', 'taxon_id', 'scientific_name', 'best_evalue'];
+      const rows = data.accessions.map(r => ({
+        ...r,
+        best_evalue: (r.best_evalue != null && r.best_evalue !== '') ? Number(r.best_evalue).toExponential(2) : '',
+      }));
+      body.innerHTML = `<div class="text-muted text-sm" style="margin-bottom:8px;">${data.count} protein(s).</div>` +
+        (rows.length ? makeTable(rows, cols) : '<p class="text-muted">None.</p>');
+    } catch (e) {
+      body.innerHTML = `<p class="text-muted">${e.message}</p>`;
+    }
+  }
+
+  function downloadFamilyProteins() {
+    const d = cmpState.drill;
+    if (!d || !d.rows || !d.rows.length) return;
+    const cols = ['accession', 'taxon_id', 'scientific_name', 'best_evalue'];
+    const lines = [cols.join(',')];
+    d.rows.forEach(r => lines.push(cols.map(c => JSON.stringify(r[c] ?? '')).join(',')));
+    downloadText(`${d.hmm}_proteins.csv`, lines.join('\n'), 'text/csv');
+  }
+
+  document.getElementById('cmp-use-evalue').addEventListener('change', function () {
+    document.getElementById('cmp-evalue').classList.toggle('hidden', !this.checked);
+  });
+
+  const FAM_COLS = ['hmm_name', 'hmm_accession', 'hmm_type', 'n_taxa', 'n_proteins'];
+
+  async function runComparison() {
+    const aIds = document.getElementById('cmp-a-ids').value.trim();
+    const bIds = document.getElementById('cmp-b-ids').value.trim();
+    const aTree = document.getElementById('cmp-a-tree').files[0];
+    const bTree = document.getElementById('cmp-b-tree').files[0];
+    if ((!aIds && !aTree) || (!bIds && !bTree)) {
+      showAlert('cmp-alert', 'error', 'Provide taxa for both groups (IDs and/or a tree).');
+      return;
+    }
+
+    const fd = new FormData();
+    fd.append('version', document.getElementById('cmp-ver').value.trim());
+    if (document.getElementById('cmp-use-evalue').checked) {
+      fd.append('evalue', document.getElementById('cmp-evalue').value.trim());
+    }
+    fd.append('group_a_ids', aIds);
+    fd.append('group_b_ids', bIds);
+    if (aTree) fd.append('group_a_tree', aTree);
+    if (bTree) fd.append('group_b_tree', bTree);
+
+    clearAlert('cmp-alert');
+    hideEl('cmp-results');
+    showEl('cmp-loading');
+    document.getElementById('cmp-run-btn').disabled = true;
+
+    try {
+      const res = await fetch('/api/compare/families', { method: 'POST', body: fd });
+      const data = await res.json();
+      hideEl('cmp-loading');
+      document.getElementById('cmp-run-btn').disabled = false;
+
+      if (data.error) { showAlert('cmp-alert', 'error', data.error); return; }
+
+      cmpState = { token: data.token, a_not_b: data.a_not_b, b_not_a: data.b_not_a, heatmap: data.heatmap };
+
+      document.getElementById('cmp-summary').innerHTML = makeTable([
+        { Group: 'A — present in', 'Taxa (query)': data.group_a.n_taxa_query, 'Taxa (in DB)': data.group_a.n_taxa_db, 'Families': data.group_a.n_families },
+        { Group: 'B — absent in', 'Taxa (query)': data.group_b.n_taxa_query, 'Taxa (in DB)': data.group_b.n_taxa_db, 'Families': data.group_b.n_families },
+      ], ['Group', 'Taxa (query)', 'Taxa (in DB)', 'Families']);
+
+      document.getElementById('cmp-anb-title').textContent = `Present in A, absent in B (${data.a_not_b.length})`;
+      document.getElementById('cmp-bna-title').textContent = `Present in B, absent in A (${data.b_not_a.length})`;
+      document.getElementById('cmp-shared-title').textContent = `Shared families (${data.n_shared})`;
+
+      document.getElementById('cmp-anb-table').innerHTML = renderFamilyTable(data.a_not_b, 'a');
+      document.getElementById('cmp-bna-table').innerHTML = renderFamilyTable(data.b_not_a, 'b');
+      document.getElementById('cmp-shared').textContent =
+        data.n_shared ? (data.shared_sample.join(', ') + (data.n_shared > data.shared_sample.length ? ' …' : '')) : 'None.';
+
+      if (data.heatmap) {
+        showImage('cmp-heatmap-img', data.heatmap);
+        const note = document.getElementById('cmp-heatmap-note');
+        if (data.heatmap_note) { note.textContent = data.heatmap_note; showEl('cmp-heatmap-note'); }
+        else { hideEl('cmp-heatmap-note'); }
+        showEl('cmp-heatmap-card');
+      } else {
+        hideEl('cmp-heatmap-card');
+      }
+
+      // reset tree + drill-down area for the new comparison
+      document.getElementById('cmp-sptree-img').innerHTML = '';
+      hideEl('cmp-ete-viewer');
+      hideEl('cmp-family-drill');
+      cmpState.drill = null;
+      clearAlert('cmp-sptree-alert');
+
+      showEl('cmp-results');
+    } catch (e) {
+      hideEl('cmp-loading');
+      document.getElementById('cmp-run-btn').disabled = false;
+      showAlert('cmp-alert', 'error', e.message);
+    }
+  }
+
+  function downloadCompare(which) {
+    const rows = cmpState[which] || [];
+    if (!rows.length) return;
+    const lines = [FAM_COLS.join(',')];
+    rows.forEach(r => lines.push(FAM_COLS.map(c => JSON.stringify(r[c] ?? '')).join(',')));
+    downloadText(`${which}.csv`, lines.join('\n'), 'text/csv');
+  }
+
+  function downloadCompareHeatmap() {
+    const img = document.querySelector('#cmp-heatmap-img img');
+    if (!img) return;
+    const a = document.createElement('a');
+    a.href = img.src; a.download = 'comparative_heatmap.png'; a.click();
+  }
+
+  async function renderCompareTree() {
+    if (!cmpState.token) return;
+    const btn = document.getElementById('cmp-sptree-btn');
+    btn.disabled = true; btn.textContent = 'Building NCBI tree…';
+    clearAlert('cmp-sptree-alert');
+    try {
+      const res = await fetch('/api/compare/species-tree', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: cmpState.token }),
+      });
+      const data = await res.json();
+      btn.disabled = false; btn.textContent = 'Render species tree (PNG)';
+      if (data.error) { showAlert('cmp-sptree-alert', 'error', data.error); return; }
+      document.getElementById('cmp-sptree-img').innerHTML =
+        `<div class="result-img-wrap"><img src="data:image/png;base64,${data.png}" style="width:100%;display:block;"></div>`;
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Render species tree (PNG)';
+      showAlert('cmp-sptree-alert', 'error', e.message);
+    }
+  }
+
+  async function openCompareEteTree() {
+    if (!cmpState.token) return;
+    const btn = document.getElementById('cmp-ete-btn');
+    btn.disabled = true; btn.textContent = 'Launching ETE4…';
+    clearAlert('cmp-sptree-alert');
+    hideEl('cmp-ete-viewer');
+    try {
+      const res = await fetch('/api/compare/ete-tree', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: cmpState.token }),
+      });
+      const data = await res.json();
+      btn.disabled = false; btn.textContent = 'Open interactive ETE4';
+      if (data.error) { showAlert('cmp-sptree-alert', 'error', data.error); return; }
+      document.getElementById('cmp-ete-viewer').innerHTML = `
+        <div class="tree-iframe-wrap" style="height:720px;">
+          <iframe style="width:100%;height:720px;border:none;" src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
+        </div>`;
+      showEl('cmp-ete-viewer');
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Open interactive ETE4';
+      showAlert('cmp-sptree-alert', 'error', e.message);
+    }
+  }
+</script>
+{% endblock %}
