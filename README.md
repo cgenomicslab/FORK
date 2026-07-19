@@ -63,6 +63,29 @@ Open `http://localhost:8080` (if 8080 is taken the app picks the next free port 
 
 ---
 
+## Deployment (production)
+
+FORK runs behind **Gunicorn + Nginx + systemd** with Let's Encrypt TLS. The full step-by-step
+runbook is in **[HOSTING_in_laptop.md](HOSTING_in_laptop.md)**. Two things that are easy to get
+wrong:
+
+- **Exactly one Gunicorn worker, threaded.** Job state lives in memory, so multiple worker
+  processes would break job polling and the ETE4 viewers. Concurrency comes from threads:
+  ```bash
+  gunicorn --worker-class gthread --workers 1 --threads 8 --timeout 300 --bind 127.0.0.1:8080 app:app
+  ```
+- **`taxa.sqlite` must exist before the server starts** — the app instantiates `NCBITaxa()` at
+  import time (see Notes).
+
+### Users & privacy
+
+The app supports **optional accounts**. Without logging in, each visitor's **Recent runs** are
+private to their browser session (cleared when the browser closes); registering an account keeps
+them saved and private across sessions and devices. Runs and their results are isolated per user.
+Passwords are hashed with werkzeug; accounts live in a local `.users.json` (never committed).
+
+---
+
 ## Toy example
 
 ### GUI — Presence/Absence workflow
@@ -193,7 +216,8 @@ FORK/
 │   ├── highres.html
 │   ├── profiling.html                # Combined Presence/Absence + High-Res page
 │   ├── compare.html                  # Comparative "concept check" page
-│   └── utilities.html
+│   ├── utilities.html
+│   └── login.html                    # Log in / register (optional accounts)
 ├── static/                           # CSS / JS assets
 │   └── ete4_overrides/contextmenu.js # Repo-served ETE4 right-click menu override
 ├── get_reference_uniprot_set_lib.py  # Backend retrieval library (importable)
@@ -216,11 +240,12 @@ FORK/
 ## Requirements
 
 ```
-flask, pandas, matplotlib, seaborn, biopython,
-mysql-connector-python, python-dotenv, ete4>=4.4.0, numpy
+flask, gunicorn, pandas, matplotlib, seaborn, biopython,
+mysql-connector-python, python-dotenv, ete4>=4.4.0, PyQt6, numpy
 ```
 
-All managed via `FORK.yml`.
+CLI tools (**MAFFT**, **trimAl**, **FastTree**, **IQ-TREE**) and the NCBI taxonomy database are
+provided by the same environment. All managed via `FORK.yml`.
 
 ---
 
@@ -232,5 +257,7 @@ All managed via `FORK.yml`.
 - ETE4 interactive viewer starts a local server on the first free port in the range 5001–5050 (auto-selected, so multiple trees can be opened at once). The D3 viewer has no server dependency.
 - The **Comparative** tab, the species-tree renders, and **auto-duplication** partitioning use ETE4's NCBI taxonomy database (`taxa.sqlite`). It downloads on first use, or build it once with `python -c "from ete4 import NCBITaxa; NCBITaxa().update_taxonomy_database()"`.
 - High-res profiling caches trees by build parameters; rerunning with the same settings reuses the cache.
+- In the hosted deployment, **Recent runs and results are per-user** (an anonymous browser session, or an optional account) — see **Deployment** above.
+- Heatmaps render at print quality with a perceptually-uniform, colorblind-safe colormap.
 
 **[Full API reference & CLI guide](API_REFERENCE.md)**
