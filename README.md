@@ -88,15 +88,28 @@ Passwords are hashed with werkzeug; accounts live in a local `.users.json` (neve
 
 ## Toy example
 
+The figures below walk one worked example: **neuronal & cell-signalling gene families across animal
+evolution** — a panel of ~18 organisms (chordates, arthropods, other invertebrates, a
+choanoflagellate, and a plant outgroup) profiled for the Pfam domains of ligand-gated ion channels,
+GPCRs, gap junctions, synaptic proteins, and developmental transcription factors.
+
+The organism panel, as a taxon-coloured NCBI species tree:
+
+![species tree of the toy-example organisms](figures/ncbi_tree.png)
+
 ### GUI — Presence/Absence workflow
 
-Query a few metabolic Pfam profiles across 5 model organisms, get a clustered heatmap, then drill into any cell to see domain architectures:
+Query several neuronal/signalling Pfam profiles across the panel, get a clustered heatmap, then drill into any cell to see domain architectures:
 
-**Step 1** — enter taxon IDs (`9606, 10090, 9598, 7227, 6087`) and Pfam names (`Glycolytic, His_Phos_1, COX2, PFK`) in the Presence/Absence tab → clustered heatmap:
+**Step 1** — enter the taxon IDs
+(`9606, 7739, 7668, 7227, 7159, 7165, 7091, 7070, 7460, 6669, 126957, 6945, 6239, 45351, 10228, 400682, 946362, 3702`)
+and Pfam names
+(`Homeodomain, HLH, Neur_chan_LBD, Neur_chan_memb, Lig_chan, Lig_chan-Glu_bd, 7tm_6, 7tm_7, Innexin, Synaptobrevin, C2`)
+in the Presence/Absence tab → clustered heatmap of protein counts per taxon × profile:
 
 ![presence absence heatmap](figures/presence_absence.png)
 
-**Step 2** — click any cell (e.g. *Glycolytic* × Mouse) → domain architecture breakdown:
+**Step 2** — click any cell (e.g. *Neur_chan_memb* × *Anopheles gambiae*) → domain-architecture breakdown of the matching proteins (here the two-domain **Neur_chan_LBD + Neur_chan_memb** ligand-gated ion-channel architecture):
 
 ![domain architecture drill-down](figures/domain_arch_presence_abs.png)
 
@@ -104,12 +117,14 @@ Query a few metabolic Pfam profiles across 5 model organisms, get a clustered he
 
 ### CLI — build a phylogenetic tree
 
+Build a gene tree for the ligand-gated ion-channel family (`Neur_chan_memb`) across the panel:
+
 ```bash
 python tree_from_db.py \
-  --pfam Glycolytic \
+  --pfam Neur_chan_memb \
   --version 2026_01 \
-  --prefix /tmp/glycolytic_tree \
-  --taxids 9606,10090,7227 \
+  --prefix /tmp/neur_chan_tree \
+  --taxids 9606,7227,6239,45351,7668,7739,7165,7091,7070 \
   --aln mafft \
   --ml fasttree \
   --no_ncbi \
@@ -118,14 +133,14 @@ python tree_from_db.py \
 
 Outputs: `.fa`, `.mft`, `.mft.gt01`, `.nwk`, `.itol_colors.txt`, `.itol_domains.txt`
 
-To open the interactive ETE4 viewer (with domain shapes and node popups):
+To open the interactive ETE4 viewer (branches coloured by taxon, bold species names, and domain shapes aligned on the right):
 
 ```bash
 python tree_from_db.py \
-  --pfam Glycolytic \
+  --pfam Neur_chan_memb \
   --version 2026_01 \
-  --prefix /tmp/glycolytic_tree \
-  --taxids 9606,10090,7227 \
+  --prefix /tmp/neur_chan_tree \
+  --taxids 9606,7227,6239,45351,7668,7739,7165,7091,7070 \
   --aln mafft \
   --ml fasttree
 ```
@@ -139,11 +154,11 @@ python tree_from_db.py \
 ```python
 from get_reference_uniprot_set_lib import fetch_sequences, fetch_sequences_by_hmm_hit
 
-# Fetch all human + mouse proteins
-records = fetch_sequences("2026_01", taxon_ids=[9606, 10090])
+# Fetch all human + fruit-fly proteins
+records = fetch_sequences("2026_01", taxon_ids=[9606, 7227])
 
-# Fetch proteins with a Glycolytic domain hit
-records = fetch_sequences_by_hmm_hit("2026_01", "Glycolytic", taxon_ids=[9606, 10090, 7227])
+# Fetch proteins with a Neur_chan_memb (ligand-gated ion channel) domain hit
+records = fetch_sequences_by_hmm_hit("2026_01", "Neur_chan_memb", taxon_ids=[9606, 7227, 6239])
 
 for r in records:
     print(r.id, len(r.seq))
@@ -155,11 +170,11 @@ Returns BioPython `SeqRecord` objects, ready for downstream analysis or writing 
 
 ### High-resolution profile
 
-Split the Glycolytic gene tree into subclade groups (paralogs A/B/C…) and profile each separately:
+Build gene trees for several neuronal/signalling Pfams at once, split each into subclade (paralog) groups, and profile every subclade separately across the panel:
 
 ![high-res profile heatmap](figures/high_res_heatmap.png)
 
-Columns are `Pfam·Subclade` pairs; the color stripe groups subclades by parent Pfam. Export as CSV or PNG.
+Columns are `Pfam·Subclade` pairs (e.g. `PF02931-A` = Neur_chan_LBD subclade A, `PF00957-A/B` = Synaptobrevin subclades); the colour stripe groups subclades by parent Pfam. Export as CSV or PNG.
 
 You can also **combine the DB Pfams with an uploaded FASTA** (headers `{taxid}.{accession}`) — it is built into its own gene tree and joins the same profile. In the node list, **click a row to add its node path** instead of typing it; in the ETE4 tree preview, **right-click a branch → "Use branch for profiling"** to send it straight to the Node-path list. Any built gene tree can be **downloaded as a plain Newick file**.
 
