@@ -28,6 +28,7 @@ from flask import (
     send_file,
     Response,
     stream_with_context,
+    redirect,
 )
 import requests as _req
 
@@ -42,6 +43,21 @@ Image.MAX_IMAGE_PIXELS = None
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(24)
+
+# Default reference-proteome version. Set FORK_DEFAULT_VERSION in .env to flip the
+# whole app to a new UniProt release in one place (forms + server-side fallbacks)
+# instead of hard-coding it. Falls back to the previous hard-coded value.
+DEFAULT_VERSION = os.getenv("FORK_DEFAULT_VERSION", "2026_01")
+
+# Default location for analysis outputs (trees, alignments, images). When the user
+# leaves the "Output directory" field blank, results go here instead of cluttering
+# the app's working directory. Defaults to a FORK_outputs/ folder next to app.py
+# (i.e. /home/cglab/FORK/FORK_outputs on the deployment); override with FORK_OUTPUT_DIR.
+FORK_OUTPUT_DIR = os.getenv(
+    "FORK_OUTPUT_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "FORK_outputs"),
+)
+os.makedirs(FORK_OUTPUT_DIR, exist_ok=True)
 # Pick up template edits (e.g. the logo in base.html) on a plain page reload,
 # without needing to restart the app.
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -85,6 +101,10 @@ def _get_config():
 
 def _new_job(job_type, meta=None):
     job_id = uuid.uuid4().hex[:12]
+    try:
+        owner = _current_owner()
+    except Exception:
+        owner = None
     with _job_lock:
         _jobs[job_id] = {
             "type": job_type,
@@ -92,10 +112,137 @@ def _new_job(job_type, meta=None):
             "log": [],
             "result": None,
             "error": None,
-            "created": time.time(),   # green UI: for the Recent runs dashboard
-            "meta": meta or {},       # green UI: family / method / output path
+            "created": time.time(),  # green UI: for the Recent runs dashboard
+            "meta": meta or {},  # green UI: family / method / output path
+            "owner": owner,  # per-user run isolation (who launched it)
         }
     return job_id
+
+
+# =====================================================================
+#  User identity & per-owner run isolation
+#  --------------------------------------------------------------------
+#  Anonymous visitors get a random per-browser id (a session cookie,
+#  cleared when the browser closes). Registered users get a persistent
+#  account. Every job is tagged with its owner (_new_job above), the
+#  Recent-runs list is filtered to the current owner, and result
+#  endpoints only serve a job to its owner (_lookup_job below).
+#  Additive & self-contained: legacy jobs without an owner stay visible
+#  to everyone, so nothing that already worked breaks.
+# =====================================================================
+from datetime import timedelta as _timedelta
+import json as _json
+import secrets as _secrets
+from werkzeug.security import (
+    generate_password_hash as _hash_pw,
+    check_password_hash as _check_pw,
+)
+
+app.permanent_session_lifetime = _timedelta(days=30)
+_USERS_FILE = Path(__file__).resolve().parent / ".users.json"
+_users_lock = threading.Lock()
+
+
+def _load_users():
+    try:
+        with open(_USERS_FILE) as fh:
+            data = _json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_users(users):
+    tmp = str(_USERS_FILE) + ".tmp"
+    with open(tmp, "w") as fh:
+        _json.dump(users, fh)
+    os.replace(tmp, _USERS_FILE)
+
+
+def _current_owner():
+    """Stable identity for the current visitor: a registered user when
+    logged in, else a per-browser anonymous id (cleared on browser close)."""
+    uid = session.get("user_id")
+    if uid:
+        return "user:" + uid
+    sid = session.get("sid")
+    if not sid:
+        sid = _secrets.token_hex(16)
+        session["sid"] = sid
+    return "anon:" + sid
+
+
+def _owns_job(job):
+    """True if the current visitor may see this job. Legacy jobs (owner is
+    None) stay visible to everyone so pre-existing runs keep working."""
+    if not job:
+        return False
+    owner = job.get("owner")
+    if owner is None:
+        return True
+    return owner == _current_owner()
+
+
+def _lookup_job(job_id):
+    """Fetch a job by id, but only if the current visitor owns it — else
+    None, so each endpoint's existing 'not found' handling applies."""
+    with _job_lock:
+        j = _jobs.get(job_id)
+    return j if _owns_job(j) else None
+
+
+@app.context_processor
+def _inject_current_user():
+    return {"current_user": session.get("user_id"), "default_version": DEFAULT_VERSION}
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "GET":
+        return render_template("login.html", mode="register", error=None)
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password") or ""
+    if not username or not password:
+        return render_template(
+            "login.html", mode="register", error="Username and password are required."
+        )
+    with _users_lock:
+        users = _load_users()
+        if username.lower() in {u.lower() for u in users}:
+            return render_template(
+                "login.html", mode="register", error="That username is already taken."
+            )
+        users[username] = {"pw": _hash_pw(password), "created": time.time()}
+        _save_users(users)
+    session["user_id"] = username
+    session.permanent = True
+    return redirect("/")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "GET":
+        return render_template("login.html", mode="login", error=None)
+    username = (request.form.get("username") or "").strip()
+    password = request.form.get("password") or ""
+    rec = _load_users().get(username)
+    if not rec or not _check_pw(rec.get("pw", ""), password):
+        return render_template(
+            "login.html", mode="login", error="Invalid username or password."
+        )
+    session["user_id"] = username
+    session.permanent = True
+    nxt = request.args.get("next") or "/"
+    if not nxt.startswith("/"):
+        nxt = "/"
+    return redirect(nxt)
+
+
+@app.route("/logout")
+def logout():
+    session.pop("user_id", None)
+    session.permanent = False
+    return redirect("/")
 
 
 # ==============================================================================================================
@@ -187,14 +334,43 @@ def api_db_defaults():
     )
 
 
+# Cache for the reference-version summary. list_available_versions() runs a
+# full aggregation over the ~126M-row proteins table, so recomputing it on every
+# homepage load is far too expensive. Versions change rarely, so cache the result.
+_db_info_cache = {"ts": 0.0, "versions": None}
+_DB_INFO_TTL = 600  # seconds
+
+
 @app.route("/api/db-info")
 def api_db_info():
+    import time as _time
+
+    now = _time.time()
+    cached = _db_info_cache["versions"]
+    if cached is not None and (now - _db_info_cache["ts"]) < _DB_INFO_TTL:
+        return jsonify({"versions": cached, "cached": True})
     try:
         config = _get_config()
         with uni.UniProtRetriever(config) as db:
-            versions = db.list_available_versions()
+            # The homepage only needs the version list, not the expensive
+            # per-version COUNT(DISTINCT ...) aggregation over the ~126M-row
+            # proteins table (that full scan took 38s+ and blocked the page).
+            # DISTINCT on the indexed `version` column is a fast loose index scan.
+            db.cursor.execute(
+                "SELECT DISTINCT version FROM proteins ORDER BY version DESC"
+            )
+            versions = [
+                {"version": (r["version"] if isinstance(r, dict) else r[0])}
+                for r in db.cursor.fetchall()
+            ]
+        _db_info_cache["versions"] = versions
+        _db_info_cache["ts"] = now
         return jsonify({"versions": versions})
     except Exception as e:
+        # Serve stale data if we have any, so a transient DB hiccup doesn't
+        # break the homepage.
+        if cached is not None:
+            return jsonify({"versions": cached, "stale": True})
         return jsonify({"error": str(e)}), 500
 
 
@@ -206,8 +382,9 @@ def api_recent_runs():
     persist across restarts. Does not touch any analysis output.
     """
     try:
+        owner = _current_owner()
         with _job_lock:
-            runs = rr.collect(_jobs)
+            runs = rr.collect(_jobs, owner=owner)
         return jsonify({"runs": runs})
     except Exception as e:
         return jsonify({"runs": [], "error": str(e)})
@@ -220,8 +397,7 @@ def api_recent_runs():
 
 @app.route("/api/job/<job_id>")
 def api_job(job_id):
-    with _job_lock:
-        job = _jobs.get(job_id)
+    job = _lookup_job(job_id)
     if not job:
         return jsonify({"error": "Not found"}), 404
 
@@ -260,9 +436,9 @@ def api_run_tree():
     files = request.files
 
     pfam = f.get("pfam", "").strip()
-    ver = f.get("version", "2026_01")
+    ver = f.get("version", DEFAULT_VERSION)
     prefix = f.get("prefix", "").strip()
-    output_dir = f.get("output_dir", "").strip()
+    output_dir = f.get("output_dir", "").strip() or FORK_OUTPUT_DIR
     aln = f.get("aln", "mafft")
     ml = f.get("ml", "fasttree")
     trimal_th = f.get("trimal_th", "0.01")
@@ -573,8 +749,7 @@ def api_run_tree():
 
 @app.route("/api/tree-static-png/<job_id>")
 def api_tree_static_png(job_id):
-    with _job_lock:
-        job = _jobs.get(job_id)
+    job = _lookup_job(job_id)
     if not job or job["status"] != "done":
         return jsonify({"error": "Not ready"}), 404
     r = job["result"]
@@ -595,8 +770,7 @@ def api_tree_static_png(job_id):
 
 @app.route("/api/download/tree/<job_id>/<filetype>")
 def api_download_tree(job_id, filetype):
-    with _job_lock:
-        job = _jobs.get(job_id)
+    job = _lookup_job(job_id)
     if not job or job["status"] != "done":
         return "Not ready", 404
     r = job["result"]
@@ -645,7 +819,7 @@ def api_download_tree(job_id, filetype):
 @app.route("/api/presence-matrix", methods=["POST"])
 def api_presence_matrix():
     data = request.json or {}
-    ver = data.get("version", "2026_01")
+    ver = data.get("version", DEFAULT_VERSION)
     pfam_queries = data.get("pfam_queries", [])
     tax_ids = data.get("tax_ids") or None
     evalue = data.get("evalue") or None
@@ -698,7 +872,6 @@ def api_presence_matrix():
                 matrix,
                 title="Presence / Absence",
                 cluster=(matrix.shape[1] >= 2),
-                cmap="viridis",
             )
             buf.seek(0)
             heatmap_b64 = base64.b64encode(buf.read()).decode()
@@ -728,7 +901,7 @@ def api_presence_matrix():
 @app.route("/api/drill-down", methods=["POST"])
 def api_drill_down():
     data = request.json or {}
-    ver = data.get("version", "2026_01")
+    ver = data.get("version", DEFAULT_VERSION)
     profile = data.get("profile", "")
     taxon_id = data.get("taxon_id")
     evalue = data.get("evalue") or None
@@ -762,7 +935,7 @@ def api_drill_down():
 @app.route("/api/draw-architecture", methods=["POST"])
 def api_draw_architecture():
     data = request.json or {}
-    ver = data.get("version", "2026_01")
+    ver = data.get("version", DEFAULT_VERSION)
     accessions = data.get("accessions", [])
     evalue = data.get("evalue") or None
     title = data.get("title", "Domain Architecture")
@@ -796,6 +969,15 @@ _CMP_BOTH_COLOR = "#1558A0"
 # Resolved group taxids from the last comparison, keyed by a short token, so the
 # tree endpoints can reuse them without round-tripping large taxid lists.
 _compare_groups = {}
+
+
+def _lookup_compare(token):
+    """A stored comparison, but only if the current visitor owns it — so one
+    user's comparison drill-down/tree can't be reached with another's token."""
+    grp = _compare_groups.get(token)
+    return grp if _owns_job(grp) else None
+
+
 _MAX_TREE_TAXA = 150  # cap NCBI topology size so it stays renderable
 
 
@@ -878,7 +1060,7 @@ def _group_colormap(only_a, only_b, both):
 def api_compare_families():
     f = request.form
     files = request.files
-    ver = f.get("version", "2026_01")
+    ver = f.get("version", DEFAULT_VERSION)
     ev = f.get("evalue", "").strip()
     evalue = float(ev) if ev else None
 
@@ -949,14 +1131,18 @@ def api_compare_families():
     heatmap_b64 = None
     heatmap_note = None
     top_names = [r["hmm_name"] for r in a_not_b[:40]]
-    if top_names:
+    if not top_names:
+        heatmap_note = "No families are present in A but not B — nothing to plot."
+    else:
         try:
             import pandas as pd
 
             pa_rows = uni.fetch_presence_absence_matrix(
                 ver, top_names, taxon_ids=a_db, evalue_cutoff=evalue, db_config=config
             )
-            if pa_rows:
+            if not pa_rows:
+                heatmap_note = "No presence data found for these families in group A."
+            else:
                 df = pd.DataFrame(pa_rows)
                 df["taxon_label"] = df.apply(
                     lambda r: f"{r['taxon_id']} · {r.get('scientific_name') or ''}".strip(
@@ -996,8 +1182,14 @@ def api_compare_families():
                     )
                     buf.seek(0)
                     heatmap_b64 = base64.b64encode(buf.read()).decode()
+                else:
+                    heatmap_note = (
+                        "Heatmap needs at least 2 group-A taxa carrying these "
+                        f"families (only {matrix.shape[0]} found)."
+                    )
         except Exception:
             heatmap_b64 = None
+            heatmap_note = "Could not render the heatmap for this result."
 
     # Stash resolved DB taxa for the tree + drill-down endpoints
     token = uuid.uuid4().hex[:12]
@@ -1006,13 +1198,22 @@ def api_compare_families():
         "b": list(b_db),
         "version": ver,
         "evalue": evalue,
+        "owner": _current_owner(),
     }
 
     return jsonify(
         {
             "token": token,
-            "group_a": {"n_taxa_query": len(a_taxa), "n_taxa_db": len(a_db), "n_families": len(names_a)},
-            "group_b": {"n_taxa_query": len(b_taxa), "n_taxa_db": len(b_db), "n_families": len(names_b)},
+            "group_a": {
+                "n_taxa_query": len(a_taxa),
+                "n_taxa_db": len(a_db),
+                "n_families": len(names_a),
+            },
+            "group_b": {
+                "n_taxa_query": len(b_taxa),
+                "n_taxa_db": len(b_db),
+                "n_families": len(names_b),
+            },
             "a_not_b": slim(a_not_b),
             "b_not_a": slim(b_not_a),
             "n_shared": len(shared),
@@ -1027,7 +1228,7 @@ def api_compare_families():
 def api_compare_family_proteins():
     """Drill-down: the protein accessions carrying one family within a group."""
     data = request.json or {}
-    grp = _compare_groups.get(data.get("token"))
+    grp = _lookup_compare(data.get("token"))
     if not grp:
         return jsonify({"error": "Run the comparison first."}), 400
 
@@ -1053,7 +1254,7 @@ def api_compare_family_proteins():
 @app.route("/api/compare/species-tree", methods=["POST"])
 def api_compare_species_tree():
     data = request.json or {}
-    grp = _compare_groups.get(data.get("token"))
+    grp = _lookup_compare(data.get("token"))
     if not grp:
         return jsonify({"error": "Run the comparison first."}), 400
 
@@ -1063,68 +1264,88 @@ def api_compare_species_tree():
     if len(all_taxids) < 2:
         return jsonify({"error": "Not enough taxa to draw a tree."}), 400
 
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    # Render in a subprocess: ETE's Qt renderer can crash the whole app (a
+    # segfault a try/except can't catch) if run in a Flask worker thread, so it
+    # must run in its own process — the same reason the interactive viewers do.
+    tax_tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".taxids.txt", delete=False)
+    tax_tmp.write("\n".join(all_taxids))
+    tax_tmp.close()
+    cmap_tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".colormap.txt", delete=False
+    )
+    cmap_tmp.write("\n".join(f"{tid}\t{col}" for tid, col in cmap.items()))
+    cmap_tmp.close()
+    out_tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+    out_tmp.close()
+
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen"
     try:
-        from ete4 import NCBITaxa
-        from ete4.treeview import TreeStyle, NodeStyle, TextFace as TVTextFace
-
-        ncbi = NCBITaxa()
-        sp_tree = ncbi.get_topology(all_taxids, intermediate_nodes=False)
-        for n in sp_tree.traverse():
-            n.dist = 0.0
-        sp_tree.to_ultrametric(topological=True)
-        sp_tree.annotate_ncbi_taxa(taxid_attr="name")
-
-        for node in sp_tree.traverse():
-            ns = NodeStyle()
-            ns["hz_line_width"] = 4
-            ns["vt_line_width"] = 4
-            ns["size"] = 0
-            if node.is_leaf:
-                col = cmap.get(node.name)
-            else:
-                leaf_cols = {cmap.get(l.name) for l in node.leaves()}
-                col = next(iter(leaf_cols)) if len(leaf_cols) == 1 else None
-            if col:
-                ns["hz_line_color"] = col
-                ns["vt_line_color"] = col
-            node.set_style(ns)
-            if node.is_leaf:
-                label = node.props.get("sci_name", node.name)
-                node.add_face(
-                    TVTextFace(f"  {label} ({node.name})"),
-                    column=0,
-                    position="branch-right",
-                )
-
-        ts = TreeStyle()
-        ts.show_leaf_name = False
-
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            tmp_path = tmp.name
-        sp_tree.render(tmp_path, w=2000, units="px", tree_style=ts)
-        b64 = base64.b64encode(Path(tmp_path).read_bytes()).decode()
-        os.unlink(tmp_path)
-
-        return jsonify(
-            {
-                "png": b64,
-                "n_taxa": len(all_taxids),
-                "legend": {
-                    "A only": _CMP_A_COLOR,
-                    "B only": _CMP_B_COLOR,
-                    "both": _CMP_BOTH_COLOR,
-                },
-            }
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "ete_species_tree.py",
+                "-t",
+                tax_tmp.name,
+                "-c",
+                cmap_tmp.name,
+                "--render",
+                out_tmp.name,
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=180,
         )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Species tree render timed out."}), 500
+    finally:
+        for p in (tax_tmp.name, cmap_tmp.name):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+    ok = (
+        proc.returncode == 0
+        and os.path.isfile(out_tmp.name)
+        and os.path.getsize(out_tmp.name) > 0
+    )
+    if not ok:
+        try:
+            os.unlink(out_tmp.name)
+        except OSError:
+            pass
+        return (
+            jsonify(
+                {"error": "Species tree render failed. " + (proc.stderr or "")[-300:]}
+            ),
+            500,
+        )
+
+    b64 = base64.b64encode(Path(out_tmp.name).read_bytes()).decode()
+    try:
+        os.unlink(out_tmp.name)
+    except OSError:
+        pass
+
+    return jsonify(
+        {
+            "png": b64,
+            "n_taxa": len(all_taxids),
+            "legend": {
+                "A only": _CMP_A_COLOR,
+                "B only": _CMP_B_COLOR,
+                "both": _CMP_BOTH_COLOR,
+            },
+        }
+    )
 
 
 @app.route("/api/compare/ete-tree", methods=["POST"])
 def api_compare_ete_tree():
     data = request.json or {}
-    grp = _compare_groups.get(data.get("token"))
+    grp = _lookup_compare(data.get("token"))
     if not grp:
         return jsonify({"error": "Run the comparison first."}), 400
 
@@ -1143,7 +1364,9 @@ def api_compare_ete_tree():
     tax_tmp.write("\n".join(all_taxids))
     tax_tmp.close()
 
-    cmap_tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".colormap.txt", delete=False)
+    cmap_tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".colormap.txt", delete=False
+    )
     cmap_tmp.write("\n".join(f"{tid}\t{col}" for tid, col in cmap.items()))
     cmap_tmp.close()
 
@@ -1191,8 +1414,10 @@ def api_highres_build_trees():
     files = request.files
 
     pfam_text = f.get("pfams", "")
-    ver = f.get("version", "2026_01")
-    output_root = f.get("output_root", "/tmp/highres_runs").strip()
+    ver = f.get("version", DEFAULT_VERSION)
+    output_root = f.get("output_root", "").strip() or os.path.join(
+        FORK_OUTPUT_DIR, "highres_runs"
+    )
     aln = f.get("aln", "mafft")
     ml = f.get("ml", "fasttree")
     gt = f.get("gt", "0.01")
@@ -1358,8 +1583,7 @@ def api_highres_build_trees():
 
 @app.route("/api/highres/job/<job_id>")
 def api_highres_job(job_id):
-    with _job_lock:
-        job = _jobs.get(job_id)
+    job = _lookup_job(job_id)
     if not job:
         return jsonify({"error": "Not found"}), 404
 
@@ -1373,8 +1597,7 @@ def api_highres_job(job_id):
 def api_highres_download_tree():
     """Return the plain Newick for one built gene tree (DB Pfam or FASTA entry)."""
     data = request.json or {}
-    with _job_lock:
-        job = _jobs.get(data.get("job_id"))
+    job = _lookup_job(data.get("job_id"))
     if not job or job["status"] != "done":
         return jsonify({"error": "Not ready"}), 404
 
@@ -1397,7 +1620,9 @@ def api_highres_download_tree():
     if not nwk:
         return jsonify({"error": "Tree file unavailable."}), 404
 
-    safe = "".join(c if (c.isalnum() or c in "._-") else "_" for c in str(pfam)) or "tree"
+    safe = (
+        "".join(c if (c.isalnum() or c in "._-") else "_" for c in str(pfam)) or "tree"
+    )
     return Response(
         nwk + "\n",
         mimetype="text/plain",
@@ -1413,8 +1638,7 @@ def api_highres_partition():
     mode = data.get("mode", "depth")
     taxon_level = data.get("taxon_level")
 
-    with _job_lock:
-        job = _jobs.get(job_id)
+    job = _lookup_job(job_id)
     if not job or job["status"] != "done":
         return jsonify({"error": "Job not ready."}), 404
 
@@ -1457,8 +1681,7 @@ def api_highres_partition():
 @app.route("/api/highres/list-nodes", methods=["POST"])
 def api_highres_list_nodes():
     data = request.json or {}
-    with _job_lock:
-        job = _jobs.get(data.get("job_id"))
+    job = _lookup_job(data.get("job_id"))
     if not job or job["status"] != "done":
         return jsonify({"error": "Not ready"}), 404
 
@@ -1476,13 +1699,12 @@ def api_highres_launch_ete4():
     job_id = data.get("job_id")
     pfam = data.get("pfam")
 
-    with _job_lock:
-        job = _jobs.get(job_id)
+    job = _lookup_job(job_id)
     if not job or job["status"] != "done":
         return jsonify({"error": "Not ready"}), 404
 
     r = job["result"]["tree_objects"].get(pfam, {})
-    ver = job["result"].get("version", "2026_01")
+    ver = job["result"].get("version", DEFAULT_VERSION)
 
     try:
         port = _find_free_port()
@@ -1551,12 +1773,11 @@ def api_highres_compute_profile():
     log_scale = data.get("log_scale", False)
     cluster_cols = data.get("cluster_cols", False)
 
-    with _job_lock:
-        job = _jobs.get(job_id)
+    job = _lookup_job(job_id)
     if not job or job["status"] != "done":
         return jsonify({"error": "Job not ready."}), 404
 
-    ver = job["result"].get("version", "2026_01")
+    ver = job["result"].get("version", DEFAULT_VERSION)
     taxids = job["result"].get("taxids")
 
     # Strip taxid prefix from leaf names to get bare accessions
@@ -1628,7 +1849,7 @@ def api_highres_compute_profile():
 @app.route("/api/fetch-sequences", methods=["POST"])
 def api_fetch_sequences():
     data = request.json or {}
-    ver = data.get("version", "2026_01")
+    ver = data.get("version", DEFAULT_VERSION)
     tax_ids = data.get("tax_ids") or None
     proteome = data.get("proteome") or None
     go_id = data.get("go_id") or None
@@ -1655,7 +1876,7 @@ def api_fetch_sequences():
 @app.route("/api/hmm-search", methods=["POST"])
 def api_hmm_search():
     data = request.json or {}
-    ver = data.get("version", "2026_01")
+    ver = data.get("version", DEFAULT_VERSION)
     query = data.get("hmm_query", "")
     evalue = data.get("evalue") or None
     tax_ids = data.get("tax_ids") or None
@@ -1681,7 +1902,7 @@ def api_hmm_search():
 @app.route("/api/accession-lookup", methods=["POST"])
 def api_accession_lookup():
     data = request.json or {}
-    ver = data.get("version", "2026_01")
+    ver = data.get("version", DEFAULT_VERSION)
     accs = data.get("accessions", [])
 
     try:
@@ -1702,7 +1923,7 @@ def api_accession_lookup():
 @app.route("/api/domain-lookup", methods=["POST"])
 def api_domain_lookup():
     data = request.json or {}
-    ver = data.get("version", "2026_01")
+    ver = data.get("version", DEFAULT_VERSION)
     accs = data.get("accessions", [])
     evalue = data.get("evalue") or None
     draw = data.get("draw", False)
@@ -1731,7 +1952,7 @@ def api_domain_lookup():
 @app.route("/api/go-domains", methods=["POST"])
 def api_go_domains():
     data = request.json or {}
-    ver = data.get("version", "2026_01")
+    ver = data.get("version", DEFAULT_VERSION)
     go_term = data.get("go_term", "")
     evalue = data.get("evalue") or None
 
@@ -1746,7 +1967,7 @@ def api_go_domains():
 
 @app.route("/api/extract-branch", methods=["POST"])
 def api_extract_branch():
-    ver = request.form.get("version", "2026_01")
+    ver = request.form.get("version", DEFAULT_VERSION)
     if "branch_file" not in request.files:
         return jsonify({"error": "No file uploaded."}), 400
 
@@ -1801,12 +2022,11 @@ def api_highres_download_fasta():
     job_id = data.get("job_id")
     partitions = data.get("partitions", {})  # {pfam: {label: [leaf_names]}}
 
-    with _job_lock:
-        job = _jobs.get(job_id)
+    job = _lookup_job(job_id)
     if not job or job["status"] != "done":
         return jsonify({"error": "Job not ready."}), 404
 
-    ver = job["result"].get("version", "2026_01")
+    ver = job["result"].get("version", DEFAULT_VERSION)
 
     pfam_subclade_map = {
         pfam: tb.strip_leaf_prefix_in_subclades(
@@ -1887,8 +2107,7 @@ def api_highres_species_tree():
     job_id = request.form.get("job_id", "")
     files = request.files
 
-    with _job_lock:
-        job = _jobs.get(job_id) if job_id else None
+    job = _lookup_job(job_id) if job_id else None
 
     # Collect taxids from gene-tree leaves
     sp_taxids: list[str] = []

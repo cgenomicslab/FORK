@@ -19,7 +19,7 @@
       <div class="form-section-body">
         <div class="form-group">
           <label for="cmp-ver">UniProt Version</label>
-          <input type="text" id="cmp-ver" value="2026_01">
+          <input type="text" id="cmp-ver" value="{{ default_version }}">
         </div>
         <div class="form-group">
           <label class="checkbox-item">
@@ -289,8 +289,10 @@
       document.getElementById('cmp-shared').textContent =
         data.n_shared ? (data.shared_sample.join(', ') + (data.n_shared > data.shared_sample.length ? ' …' : '')) : 'None.';
 
-      if (data.heatmap) {
-        showImage('cmp-heatmap-img', data.heatmap);
+      if (data.heatmap || data.heatmap_note) {
+        const img = document.getElementById('cmp-heatmap-img');
+        if (data.heatmap) showImage('cmp-heatmap-img', data.heatmap);
+        else img.innerHTML = '';
         const note = document.getElementById('cmp-heatmap-note');
         if (data.heatmap_note) { note.textContent = data.heatmap_note; showEl('cmp-heatmap-note'); }
         else { hideEl('cmp-heatmap-note'); }

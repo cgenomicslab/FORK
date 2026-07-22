@@ -143,6 +143,27 @@ def _domain_color(name):
     return "#{:02x}{:02x}{:02x}".format((h >> 16) & 0xFF, (h >> 8) & 0xFF, h & 0xFF)
 
 
+EARTHY_PALETTE = [
+    "#c96a3f",  # burnt orange
+    "#4f7a4f",  # muted green
+    "#d9a441",  # gold
+    "#3f6f8f",  # steel blue
+    "#b5482f",  # brick red
+    "#6a5a8f",  # muted purple
+    "#3c9d8a",  # teal
+    "#c26a86",  # dusty rose
+    "#8a9a3a",  # olive
+    "#7a4a2e",  # brown
+    "#2e6f6a",  # deep teal
+    "#d98a4f",  # amber
+    "#8f2f3f",  # maroon
+    "#7fb2c9",  # light blue
+    "#e0c060",  # pale gold
+    "#5a3a58",  # plum
+    "#a86a3f",  # tan-brown
+    "#4a6f9a",  # blue
+]
+
 # ===========================================================================================================================
 
 #                                                       ARGUMENTS
@@ -538,7 +559,12 @@ if __name__ == "__main__":
 
             t = PhyloTree(nwk_str, sp_naming_function=get_species_name)
             if not args.get("use_resolved"):
-                t.set_outgroup(t.get_midpoint_outgroup())
+                try:
+                    _og = t.get_midpoint_outgroup()
+                    if _og is not None and _og is not t:
+                        t.set_outgroup(_og)
+                except Exception as _e:
+                    print(f"WARNING--midpoint rooting skipped ({_e})")
                 t.resolve_polytomy(descendants=True)
 
             # Annotate internal nodes with evoltype ("D"=duplication, "S"=speciation)
@@ -642,26 +668,9 @@ if __name__ == "__main__":
                             t_static.annotate_ncbi_taxa()
                         except Exception as e:
                             print(f"WARNING--NCBI annotation failed for static: {e}")
-                    distinct_palette = [
-                        "#e6194B",
-                        "#3cb44b",
-                        "#ffe119",
-                        "#4363d8",
-                        "#f58231",
-                        "#911eb4",
-                        "#42d4f4",
-                        "#f032e6",
-                        "#bfef45",
-                        "#469990",
-                        "#dcbeff",
-                        "#9A6324",
-                        "#800000",
-                        "#aaffc3",
-                        "#808000",
-                        "#ffd8b1",
-                        "#000075",
-                        "#a9a9a9",
-                    ]
+
+                    distinct_palette = EARTHY_PALETTE
+
                     unique_taxids = sorted(
                         {n.name.split(".")[0] for n in t_static.leaves()}
                     )
@@ -797,6 +806,8 @@ if __name__ == "__main__":
                     BASIC_LAYOUT,
                 )
 
+                BASIC_LAYOUT.active = False
+
                 def _draw_leaf(node):
                     if not node.is_leaf:
                         return
@@ -806,11 +817,44 @@ if __name__ == "__main__":
                     sci = node.props.get("sci_name", "")
                     label = f"{display}  {gene}  [{sci}]".strip(" []")
                     return SmartTextFace(
-                        label, style="fill: black;", position="right", column=0
+                        label,
+                        style="fill: #555; font-family: 'Fira Code', monospace;",
+                        position="right",
+                        column=1,
                     )
 
                 leaf_name_layout = Layout(
-                    name="Leaf names", active=True, draw_node=_draw_leaf
+                    name="Accession names", active=False, draw_node=_draw_leaf
+                )
+
+                def _draw_sci_name(node):
+                    if not node.is_leaf:
+                        return
+                    sci = node.props.get("sci_name")
+                    if not sci:
+                        return
+                    col = node.props.get("branch_color") or "#333333"
+                    return SmartTextFace(
+                        sci,
+                        style={
+                            "fill": col,
+                            "font-family": "'Fira Code', monospace",
+                            "font-weight": "bold",
+                        },
+                        position="right",
+                        column=0,
+                    )
+
+                sci_name_layout = Layout(
+                    name="Species names", active=True, draw_node=_draw_sci_name
+                )
+                style_layout = Layout(
+                    name="Tree style",
+                    active=True,
+                    draw_tree={
+                        "collapsed": {"shape": "outline"},
+                        "node-height-min": 1,
+                    },
                 )
 
                 def layout_seqface(node):
@@ -833,11 +877,41 @@ if __name__ == "__main__":
                 domain_aliases = {
                     name_to_alias[n]: {
                         "fill": _domain_color(n),
-                        "stroke": "black",
-                        "stroke-width": "1",
+                        "stroke": "#333333",
+                        "stroke-width": "0.5",
+                        "rx": "5",
+                        "ry": "5",
                     }
                     for n in unique_domain_names
                 }
+                domain_aliases["backbone"] = {"fill": "#c8c8c8", "stroke": "none"}
+
+                # def _draw_domains(node):
+                #     if not node.is_leaf:
+                #         return
+                #     accession = (
+                #         node.name.split(".", 1)[1] if "." in node.name else node.name
+                #     )
+                #     domains = domain_dict.get(accession, [])
+                #     if not domains:
+                #         return
+                #     seq_len = max(d["ali_to"] for d in domains)
+                #     faces = []
+                #     for i, d in enumerate(domains):
+                #         width = max(
+                #             30, int((d["ali_to"] - d["ali_from"]) / seq_len * 200)
+                #         )
+                #         faces.append(
+                #             RectFace(
+                #                 wmax=width,
+                #                 hmax=18,
+                #                 style=name_to_alias[d["hmm_name"]],
+                #                 text=d["hmm_name"],
+                #                 position="aligned",
+                #                 column=i + 1,
+                #             )
+                #         )
+                #     return faces
 
                 def _draw_domains(node):
                     if not node.is_leaf:
@@ -848,22 +922,40 @@ if __name__ == "__main__":
                     domains = domain_dict.get(accession, [])
                     if not domains:
                         return
-                    seq_len = max(d["ali_to"] for d in domains)
+                    domains = sorted(domains, key=lambda d: d["ali_from"])
+                    total_len = max(d["ali_to"] for d in domains)
+                    if total_len <= 0:
+                        return
+                    scale = 320.0 / total_len
                     faces = []
-                    for i, d in enumerate(domains):
-                        width = max(
-                            30, int((d["ali_to"] - d["ali_from"]) / seq_len * 200)
-                        )
+                    col = 1
+                    prev = 0
+                    for d in domains:
+                        gap_px = int((d["ali_from"] - prev) * scale)
+                        if gap_px > 0:
+                            faces.append(
+                                RectFace(
+                                    wmax=gap_px,
+                                    hmax=4,
+                                    style="backbone",
+                                    position="aligned",
+                                    column=col,
+                                )
+                            )
+                            col += 1
+                        dom_px = max(8, int((d["ali_to"] - d["ali_from"]) * scale))
                         faces.append(
                             RectFace(
-                                wmax=width,
-                                hmax=18,
+                                wmax=dom_px,
+                                hmax=16,
                                 style=name_to_alias[d["hmm_name"]],
                                 text=d["hmm_name"],
                                 position="aligned",
-                                column=i + 1,
+                                column=col,
                             )
                         )
+                        col += 1
+                        prev = d["ali_to"]
                     return faces
 
                 domain_layout = Layout(
@@ -964,26 +1056,9 @@ if __name__ == "__main__":
                         print(f"WARNING--Colormap lineage resolution failed: {e}")
 
                 if color_by == "taxon" and not interactive_colormap:
-                    distinct_palette = [
-                        "#e6194B",
-                        "#3cb44b",
-                        "#ffe119",
-                        "#4363d8",
-                        "#f58231",
-                        "#911eb4",
-                        "#42d4f4",
-                        "#f032e6",
-                        "#bfef45",
-                        "#469990",
-                        "#dcbeff",
-                        "#9A6324",
-                        "#800000",
-                        "#aaffc3",
-                        "#808000",
-                        "#ffd8b1",
-                        "#000075",
-                        "#a9a9a9",
-                    ]
+
+                    distinct_palette = EARTHY_PALETTE
+
                     unique_taxids = sorted({n.name.split(".")[0] for n in t.leaves()})
                     interactive_colormap = {
                         tid: distinct_palette[i % len(distinct_palette)]
@@ -1076,6 +1151,8 @@ if __name__ == "__main__":
                 t.explore(
                     layouts=[
                         BASIC_LAYOUT,
+                        style_layout,
+                        sci_name_layout,
                         leaf_name_layout,
                         domain_layout,
                         seq_layout,
@@ -1087,7 +1164,7 @@ if __name__ == "__main__":
                     open_browser=False,
                     port=args["port"],
                     host="0.0.0.0",
-                    show_leaf_name=True,
+                    show_leaf_name=False,
                     show_popup_props=[
                         "name",
                         "sci_name",

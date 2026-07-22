@@ -30,7 +30,7 @@
           <div class="form-row">
             <div class="form-group">
               <label for="ver">UniProt Version</label>
-              <input type="text" id="ver" value="2026_01">
+              <input type="text" id="ver" value="{{ default_version }}">
             </div>
             <div class="form-group">
               <label for="evalue">E-value cutoff (optional)</label>
@@ -73,7 +73,7 @@
         <div class="form-section-body">
           <div class="form-group">
             <label for="output-root">Output / cache directory</label>
-            <input type="text" id="output-root" value="/home/user/highres_runs">
+            <input type="text" id="output-root" placeholder="leave blank — saved to FORK_outputs on the server">
             <span class="hint">Per-config subdirectories are created here. Repeated runs with identical parameters reuse cached trees.</span>
           </div>
           <div class="form-row">

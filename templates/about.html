@@ -52,6 +52,56 @@
   </div>
 </div>
 
+<!-- About the tool -->
+<div class="about-sec"><h2>About the tool</h2><span class="rule"></span></div>
+<div class="about-body">
+  <p>
+    <strong>FORK</strong> is a Flask web app for querying, visualizing, and comparing
+    proteins across a <strong>local UniProt Reference Proteomes database</strong> enriched with
+    Pfam-A HMM search results. Once the database is set up, queries run entirely offline — no
+    internet needed.
+  </p>
+  <p>
+    Source code &amp; documentation:
+    <a href="https://github.com/cgenomicslab/fork" target="_blank" rel="noopener">github.com/cgenomicslab/fork</a>.
+  </p>
+  <p>It provides four main analysis modules, plus sequence/domain utilities:</p>
+  <table class="mod-tbl">
+    <thead>
+      <tr><th>Module</th><th>What you get</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Phylogenetic Tree</td>
+        <td>Fetch sequences by Pfam/taxon → align (MAFFT) → tree (FastTree/IQ-TREE) →
+          interactive D3 viewer or ETE4 explorer with domain shapes.</td>
+      </tr>
+      <tr>
+        <td>Presence / Absence</td>
+        <td>Taxa × Pfam profile heatmap; drill into any cell for sub-profiles or domain
+          architecture breakdown.</td>
+      </tr>
+      <tr>
+        <td>High-Res Profile</td>
+        <td>Partition gene trees into subclade (paralog) groups — by depth, manual MRCA, node
+          path, or automatic duplication detection — and profile each subclade separately
+          across taxa.</td>
+      </tr>
+      <tr>
+        <td>Comparative Analysis</td>
+        <td>"Concept check": find protein families present in one taxon group but absent in
+          another (e.g. Mucorales vs Human) — with present-in-A / present-in-B / shared tables,
+          a heatmap, a group-coloured species tree, and protein-accession drill-down.</td>
+      </tr>
+      <tr>
+        <td>Utilities</td>
+        <td>Standard retrieval, HMM search, accession lookup, domain coordinates, GO→domain
+          profiles, and branch extraction.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
 <!-- About the lab -->
 <div class="about-sec"><h2>About the lab</h2><span class="rule"></span></div>
 <div class="about-body">
@@ -75,46 +125,6 @@
     <div><div class="k">Institute</div><div class="v">IMBB-FORTH · Heraklion, Crete</div></div>
     <div><div class="k">Website</div><div class="v"><a href="https://cgenomicslab.org/" target="_blank" rel="noopener">cgenomicslab.org</a></div></div>
   </div>
-</div>
-
-<!-- About the tool -->
-<div class="about-sec"><h2>About the tool</h2><span class="rule"></span></div>
-<div class="about-body">
-  <p>
-    <strong>FORK</strong> is a Flask web app for querying, visualizing, and comparing
-    proteins across a <strong>local UniProt Reference Proteomes database</strong> enriched with
-    Pfam-A HMM search results. Once the database is set up, queries run entirely offline — no
-    internet needed.
-  </p>
-  <p>It provides three main analysis modules, plus sequence/domain utilities:</p>
-  <table class="mod-tbl">
-    <thead>
-      <tr><th>Module</th><th>What you get</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>Phylogenetic Tree</td>
-        <td>Fetch sequences by Pfam/taxon → align (MAFFT) → tree (FastTree/IQ-TREE) →
-          interactive D3 viewer or ETE4 explorer with domain shapes.</td>
-      </tr>
-      <tr>
-        <td>Presence / Absence</td>
-        <td>Taxa × Pfam profile heatmap; drill into any cell for sub-profiles or domain
-          architecture breakdown.</td>
-      </tr>
-      <tr>
-        <td>High-Res Profile</td>
-        <td>Partition gene trees into subclade (paralog) groups — by depth, manual MRCA, node
-          path, or automatic duplication detection — and profile each subclade separately
-          across taxa.</td>
-      </tr>
-      <tr>
-        <td>Utilities</td>
-        <td>Standard retrieval, HMM search, accession lookup, domain coordinates, GO→domain
-          profiles, and branch extraction.</td>
-      </tr>
-    </tbody>
-  </table>
 </div>
 
 {% endblock %}

@@ -18,7 +18,7 @@
     <div class="form-row" style="margin-bottom:12px;">
       <div class="form-group">
         <label for="sr-ver">UniProt Version</label>
-        <input type="text" id="sr-ver" value="2026_01">
+        <input type="text" id="sr-ver" value="{{ default_version }}">
       </div>
       <div class="form-group">
         <label for="sr-tax">Taxonomy IDs (comma separated)</label>
@@ -57,7 +57,7 @@
     <div class="form-row" style="margin-bottom:12px;">
       <div class="form-group">
         <label for="hmm-ver">UniProt Version</label>
-        <input type="text" id="hmm-ver" value="2026_01">
+        <input type="text" id="hmm-ver" value="{{ default_version }}">
       </div>
       <div class="form-group">
         <label for="hmm-query">HMM Name or Accession</label>
@@ -92,7 +92,7 @@
     <div class="form-row" style="margin-bottom:12px;">
       <div class="form-group">
         <label for="acc-ver">UniProt Version</label>
-        <input type="text" id="acc-ver" value="2026_01">
+        <input type="text" id="acc-ver" value="{{ default_version }}">
       </div>
     </div>
     <div class="form-group" style="margin-bottom:12px;">
@@ -117,7 +117,7 @@
     <div class="form-row" style="margin-bottom:12px;">
       <div class="form-group">
         <label for="dom-ver">UniProt Version</label>
-        <input type="text" id="dom-ver" value="2026_01">
+        <input type="text" id="dom-ver" value="{{ default_version }}">
       </div>
       <div class="form-group">
         <label for="dom-evalue">E-value cutoff (optional)</label>
@@ -151,7 +151,7 @@
     <div class="form-row" style="margin-bottom:12px;">
       <div class="form-group">
         <label for="go-ver">UniProt Version</label>
-        <input type="text" id="go-ver" value="2026_01">
+        <input type="text" id="go-ver" value="{{ default_version }}">
       </div>
       <div class="form-group">
         <label for="go-term">GO Term</label>
@@ -184,7 +184,7 @@
     <div class="form-row" style="margin-bottom:12px;">
       <div class="form-group">
         <label for="branch-ver">UniProt Version</label>
-        <input type="text" id="branch-ver" value="2026_01">
+        <input type="text" id="branch-ver" value="{{ default_version }}">
       </div>
       <div class="form-group">
         <label for="branch-file">Branch Newick file</label>

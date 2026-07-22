@@ -178,11 +178,19 @@ def branch_col(node):
 
 
 def name_layout(node):
+    if not node.is_leaf:
+        return
     if "sci_name" in node.props:
         sci = str(node.props["sci_name"])
         return TextFace(sci, position="right", fs_min=6, fs_max=25)
     else:
         return TextFace(node.name, position="right", fs_min=6, fs_max=25)
+
+
+def clade_name_layout(node):
+    if node.is_leaf or "sci_name" not in node.props:
+        return
+    return TextFace(str(node.props["sci_name"]), position="right", fs_min=6, fs_max=25)
 
 
 def header_layout(tree):
@@ -236,6 +244,7 @@ def count_layout(node):
 base_layout = Layout(name="base", draw_tree=my_tree_style)
 branch_layout = Layout(name="branch colours", draw_node=branch_col)
 label_layout = Layout(name="scientific names", draw_node=name_layout)
+clade_layout = Layout(name="clade names", active=False, draw_node=clade_name_layout)
 hdr_layout = Layout(name="column headers", draw_tree=header_layout)
 cnt_layout = Layout(name="subclade counts", draw_node=count_layout)
 
@@ -245,13 +254,8 @@ print(
 
 # Ensure the tree has a drawable width — ETE4 SmartView raises "Cannot draw
 # tree with width 0" for topology-only / zero-length trees (e.g. an NCBI
-# taxonomy tree). Bump non-positive branches, then fall back to a uniform
-# dendrogram if the whole tree is still effectively zero-width.
-for _n in tree.traverse():
-    if _n.up is not None and (not _n.dist or _n.dist <= 0):
-        _n.dist = 1e-6
-
-
+# taxonomy tree). If the tree is effectively zero-width, give every branch a
+# uniform length so it renders as a clean dendrogram.
 def _root_dist(_leaf):
     _d, _cur = 0.0, _leaf
     while _cur.up is not None:
@@ -260,13 +264,16 @@ def _root_dist(_leaf):
     return _d
 
 
-if max((_root_dist(_l) for _l in tree.leaves()), default=0.0) < 1e-5:
+# Don't micro-bump zero branches to 1e-6 first: on a deep tree those tiny sums
+# creep past a small cutoff and leave the tree still ~zero-width. A single
+# uniform pass with a generous threshold is robust for any tree depth.
+if max((_root_dist(_l) for _l in tree.leaves()), default=0.0) < 1e-3:
     for _n in tree.traverse():
         if _n.up is not None:
             _n.dist = 1.0
 
 tree.explore(
-    layouts=[base_layout, branch_layout, label_layout, hdr_layout, cnt_layout],
+    layouts=[base_layout, branch_layout, label_layout, clade_layout, hdr_layout, cnt_layout],
     port=args.port,
     open_browser=False,
     keep_server=True,

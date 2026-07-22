@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Register' if mode == 'register' else 'Log in' }} — FORK{% endblock %}
+{% block content %}
+<div style="max-width:380px;margin:56px auto;">
+  <h1 style="font-size:22px;margin:0 0 6px;">
+    {{ 'Create an account' if mode == 'register' else 'Log in' }}
+  </h1>
+  <p style="color:#6b7280;font-size:14px;margin:0 0 20px;">
+    {% if mode == 'register' %}
+      An account keeps your Recent Runs private and saved across sessions and devices.
+    {% else %}
+      Log in to see your saved Recent Runs.
+    {% endif %}
+  </p>
+
+  {% if error %}
+    <div style="background:#fdecea;color:#b3261e;padding:10px 12px;border-radius:6px;font-size:13px;margin-bottom:14px;">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  <form method="post" action="{{ '/register' if mode == 'register' else '/login' }}">
+    <label style="display:block;font-size:13px;margin-bottom:4px;">Username</label>
+    <input name="username" autocomplete="username" required
+           style="width:100%;padding:9px 11px;margin-bottom:14px;border:1px solid #ccc;border-radius:6px;font-size:14px;box-sizing:border-box;">
+    <label style="display:block;font-size:13px;margin-bottom:4px;">Password</label>
+    <input name="password" type="password" required
+           autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}"
+           style="width:100%;padding:9px 11px;margin-bottom:18px;border:1px solid #ccc;border-radius:6px;font-size:14px;box-sizing:border-box;">
+    <button type="submit"
+            style="width:100%;padding:10px;background:#2f7d4f;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;">
+      {{ 'Create account' if mode == 'register' else 'Log in' }}
+    </button>
+  </form>
+
+  <p style="font-size:13px;color:#6b7280;margin-top:16px;text-align:center;">
+    {% if mode == 'register' %}
+      Already have an account? <a href="/login">Log in</a>
+    {% else %}
+      No account? <a href="/register">Create one</a>
+    {% endif %}
+  </p>
+  <p style="font-size:12px;color:#9ca3af;margin-top:8px;text-align:center;">
+    You can also keep using FORK without an account — your runs just stay in this
+    browser until you close it.
+  </p>
+</div>
+{% endblock %}
