@@ -1,6 +1,7 @@
 # FORK
 
 A Flask web app for querying, visualizing, and comparing proteins across a **local UniProt Reference Proteomes database** enriched with Pfam-A HMM search results. Built at CGLab — no internet needed for queries once the database is set up.
+FORK can be accessed from this link : https://fork.cgenomicslab.org/ 
 
 ![home tab](figures/home_tab.png)
 
