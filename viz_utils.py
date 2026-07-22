@@ -388,10 +388,46 @@ def render_tree(
 # ---------------------------------------------------------------------------
 
 
+# --- Publication polish shared by the clustered heatmaps -------------------
+# `mako` is a perceptually-uniform, colorblind-safe sequential map (a single
+# blue-green hue ramp, light -> dark), rendered at print-quality DPI. These
+# push the seaborn clustermaps toward journal-figure quality without changing
+# any of the underlying data or clustering.
+_HEATMAP_CMAP = "mako"
+_HEATMAP_DPI = 300
+_HAIRLINE = "#c2c6bf"
+_DENDRO_COL = "#9aa097"
+
+
+def _polish_clustermap(g):
+    """Muted hairline dendrograms, a slim outlined colorbar and a thin heatmap
+    frame — the finishing touches that separate a default seaborn clustermap
+    from a figure you'd put in a paper. Purely cosmetic; data is untouched."""
+    for dax in (getattr(g, "ax_row_dendrogram", None),
+                getattr(g, "ax_col_dendrogram", None)):
+        if dax is None:
+            continue
+        dax.set_facecolor("none")
+        for coll in dax.collections:
+            coll.set_linewidth(0.6)
+            coll.set_color(_DENDRO_COL)
+    try:
+        g.cax.outline.set_edgecolor(_HAIRLINE)
+        g.cax.outline.set_linewidth(0.6)
+        g.cax.tick_params(width=0.5, length=3, labelsize=7)
+    except Exception:
+        pass
+    for s in g.ax_heatmap.spines.values():
+        s.set_visible(True)
+        s.set_linewidth(0.6)
+        s.set_edgecolor(_HAIRLINE)
+    g.ax_heatmap.tick_params(width=0.5, length=2.5, colors="#3a3f39")
+
+
 def draw_presence_absence_heatmap(
     matrix_df,
     title: str = "Presence / Absence Heatmap",
-    cmap: str = "viridis",
+    cmap: str = _HEATMAP_CMAP,
     cluster: bool = True,
 ) -> io.BytesIO:
     """
@@ -456,7 +492,9 @@ def draw_presence_absence_heatmap(
         buf = io.BytesIO()
 
         # bbox_inches="tight" will automatically expand the left edge if the text needs more room
-        g.fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+        _polish_clustermap(g)
+        g.fig.savefig(buf, format="png", dpi=_HEATMAP_DPI, bbox_inches="tight",
+                      facecolor="white")
         buf.seek(0)
         plt.close(g.fig)
         return buf
@@ -547,7 +585,7 @@ def draw_highres_profile_heatmap(
 
     # ---------------- Auto-select colormap ----------------
     if cmap is None:
-        cmap = "Greys" if binary else "viridis"
+        cmap = "Greys" if binary else _HEATMAP_CMAP
 
     # ---------------- Build display matrix (log-transform if requested) ----------------
     if log_scale and not binary:
@@ -706,7 +744,9 @@ def draw_highres_profile_heatmap(
         )
 
     buf = io.BytesIO()
-    g.fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    _polish_clustermap(g)
+    g.fig.savefig(buf, format="png", dpi=_HEATMAP_DPI, bbox_inches="tight",
+                  facecolor="white")
     buf.seek(0)
     plt.close(g.fig)
     return buf
