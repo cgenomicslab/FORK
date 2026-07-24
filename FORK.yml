@@ -34,7 +34,13 @@ dependencies:
   - clustalo=1.2.4
   - fasttree=2.2.0
   - iqtree=3.1.1
+  - mafft
   - trimal=1.5.1
+
+  # Web App & Serving
+  - flask
+  - python-dotenv
+  - gunicorn
 
   # System/Database Support
   - mysql-connector-python
@@ -43,6 +49,7 @@ dependencies:
   # Pip-Specific Packages & Web Automation
   - pip:
       - ete4
+      - PyQt6
       - ete3==3.1.3
       - itolapi==4.1.6
       - pastml==1.9.42

@@ -71,11 +71,7 @@
       <div class="form-section">
         <div class="form-section-header">Tree Build Parameters</div>
         <div class="form-section-body">
-          <div class="form-group">
-            <label for="output-root">Output / cache directory</label>
-            <input type="text" id="output-root" placeholder="leave blank — saved to FORK_outputs on the server">
-            <span class="hint">Per-config subdirectories are created here. Repeated runs with identical parameters reuse cached trees.</span>
-          </div>
+          <input type="hidden" id="output-root" value="">
           <div class="form-row">
             <div class="form-group">
               <label for="aln">Aligner</label>
@@ -98,10 +94,7 @@
               <label for="gt">trimAl -gt</label>
               <input type="text" id="gt" value="0.01">
             </div>
-            <div class="form-group">
-              <label for="cpu">CPU threads</label>
-              <input type="number" id="cpu" value="8" min="1">
-            </div>
+            <input type="hidden" id="cpu" value="4">
           </div>
         </div>
       </div>

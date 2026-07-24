@@ -1,5 +1,9 @@
 # === Secrets & Config ===
 .env
+.users.json          # user accounts (password hashes) — never commit
+.users.json.tmp
+.run_history.json     # per-user Recent-runs history
+.run_history.json.tmp
 
 # === Python ===
 __pycache__/
@@ -45,3 +49,7 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# === Internal notes (keep private — do NOT publish) ===
+INTERFACE_CHANGES.md
+HOSTING_in_laptop.md

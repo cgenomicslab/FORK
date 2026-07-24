@@ -450,6 +450,28 @@ def api_run_tree():
     color_by = f.get("color_by", "taxon")
     msa_range = f.get("msa_range", "").strip()
     local_fasta = f.get("local_fasta", "").strip()
+    # Accept an uploaded FASTA (headers {taxid}.{accession}) to combine with the DB Pfam
+    # into a single tree — mirrors the High-Res combine-FASTA feature.
+    if "combine_fasta" in files and files["combine_fasta"].filename:
+        up = files["combine_fasta"]
+        raw_bytes = up.read()
+        fasta_text = raw_bytes.decode("utf-8", errors="replace")
+        headers = [
+            line[1:].strip().split()[0]
+            for line in fasta_text.splitlines()
+            if line.startswith(">") and line[1:].strip()
+        ]
+        if not headers:
+            return jsonify({"error": "Uploaded FASTA has no sequences (no '>' headers)."}), 400
+        if not any(tb.parse_leaf_to_taxid(h) is not None for h in headers):
+            return (
+                jsonify({"error": "FASTA headers must be '{taxid}.{accession}', e.g. '>9606.P04637'."}),
+                400,
+            )
+        tmp = tempfile.NamedTemporaryFile(mode="wb", suffix=".fa", delete=False)
+        tmp.write(raw_bytes)
+        tmp.close()
+        local_fasta = tmp.name
     viewer = f.get("viewer", "d3")
     attach_msa = f.get("attach_msa") == "true"
     static_layers = f.get("static_layers", "names,domains,colors,gene")
@@ -1056,6 +1078,50 @@ def _group_colormap(only_a, only_b, both):
     return cmap
 
 
+# Multi-group query state + visuals -------------------------------------------
+_multi_groups = {}
+
+# Categorical palette, one colour per group (present greens/teal first, then
+# distinct warm/cool hues). Reuses the two-group colours as the first entries.
+_MULTI_COLORS = [
+    "#1C6B54", "#B9722E", "#1558A0", "#8E44AD",
+    "#C0392B", "#0E9AA7", "#7D6608", "#5D6D7E",
+]
+
+
+def _lookup_multi(token):
+    grp = _multi_groups.get(token)
+    return grp if _owns_job(grp) else None
+
+
+def _cap_multi_taxa(groups, cap=_MAX_TREE_TAXA):
+    """Union of all groups' DB taxa, capped for a renderable tree by taking an
+    even share from each group (so every group stays represented)."""
+    per = max(1, cap // max(1, len(groups)))
+    union, seen = [], set()
+    for g in groups:
+        n = 0
+        for t in g["db_taxa"]:
+            if t in seen:
+                continue
+            seen.add(t)
+            union.append(t)
+            n += 1
+            if n >= per:
+                break
+    return sorted(union)
+
+
+def _multi_colormap(groups):
+    """taxid -> colour, one colour per group (first group listed wins on overlap)."""
+    cmap = {}
+    for i, g in enumerate(groups):
+        col = _MULTI_COLORS[i % len(_MULTI_COLORS)]
+        for t in g["db_taxa"]:
+            cmap.setdefault(str(t), col)
+    return cmap
+
+
 @app.route("/api/compare/families", methods=["POST"])
 def api_compare_families():
     f = request.form
@@ -1199,6 +1265,8 @@ def api_compare_families():
         "version": ver,
         "evalue": evalue,
         "owner": _current_owner(),
+        "a_not_b_names": [r["hmm_name"] for r in a_not_b],
+        "b_not_a_names": [r["hmm_name"] for r in b_not_a],
     }
 
     return jsonify(
@@ -1398,6 +1466,475 @@ def api_compare_ete_tree():
     if not connected:
         proc.kill()
         return jsonify({"error": "ETE species tree did not start in time."}), 500
+
+    _ete4_ports.add(port)
+    return jsonify({"ok": True, "port": port, "pid": proc.pid})
+
+
+@app.route("/api/compare/profile-tree", methods=["POST"])
+def api_compare_profile_tree():
+    """Interactive ETE profile viewer for a comparison: the NCBI species tree of
+    the union of both groups, with an aligned heatmap track of the differential
+    families (A-not-B by default). Group-A taxa carry the families; group-B taxa
+    read as zeros — so the presence/absence contrast is visible on the tree."""
+    data = request.json or {}
+    grp = _lookup_compare(data.get("token"))
+    if not grp:
+        return jsonify({"error": "Run the comparison first."}), 400
+
+    which = (data.get("which") or "a_not_b").strip()
+    fam_names = grp.get("b_not_a_names" if which == "b_not_a" else "a_not_b_names") or []
+    fam_names = fam_names[:40]
+    if not fam_names:
+        return jsonify({"error": "No differential families to profile."}), 400
+
+    only_a, only_b, both = _cap_group_taxa(grp["a"], grp["b"])
+    cmap = _group_colormap(only_a, only_b, both)
+    union_taxa = list(only_a) + list(only_b) + list(both)
+    if len(union_taxa) < 2:
+        return jsonify({"error": "Not enough taxa to draw a tree."}), 400
+
+    ver = grp["version"]
+    evalue = grp.get("evalue")
+    try:
+        config = _get_config()
+        pa_rows = uni.fetch_presence_absence_matrix(
+            ver, fam_names, taxon_ids=union_taxa, evalue_cutoff=evalue, db_config=config
+        )
+    except Exception as e:
+        return jsonify({"error": f"Could not build the profile matrix: {e}"}), 500
+    if not pa_rows:
+        return jsonify({"error": "No presence data found for these families."}), 404
+
+    # Pivot into {taxid: {"label": "taxid  sci_name", fam: count}}
+    counts = {}
+    labels = {}
+    for r in pa_rows:
+        tid = str(r["taxon_id"])
+        counts.setdefault(tid, {})[r["hmm_name"]] = r.get("protein_count", 0) or 0
+        if tid not in labels:
+            sci = (r.get("scientific_name") or "").strip()
+            labels[tid] = f"{tid}  {sci}".strip()
+    # Include every union taxon as a row (group-B taxa with no hits → all zeros),
+    # so the tree shows both groups even where a family is absent.
+    for t in union_taxa:
+        tid = str(t)
+        counts.setdefault(tid, {})
+        labels.setdefault(tid, tid)
+
+    import csv as _csv
+    import io as _io
+
+    buf = _io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow(["label"] + fam_names)
+    for tid, label in labels.items():
+        writer.writerow(
+            [label] + [counts.get(tid, {}).get(fam, 0) for fam in fam_names]
+        )
+    matrix_csv = buf.getvalue()
+
+    try:
+        port = _find_free_port()
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
+
+    mat_tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    mat_tmp.write(matrix_csv)
+    mat_tmp.close()
+
+    cmap_tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".colormap.txt", delete=False
+    )
+    cmap_tmp.write("\n".join(f"{tid}\t{col}" for tid, col in cmap.items()))
+    cmap_tmp.close()
+
+    cmd = [
+        sys.executable,
+        "ete_highres_profile.py",
+        "-m",
+        mat_tmp.name,
+        "-c",
+        cmap_tmp.name,
+        "-p",
+        str(port),
+    ]
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    os.system(f"fuser -k {port}/tcp >/dev/null 2>&1")
+    proc = subprocess.Popen(cmd, env=env)
+
+    deadline = time.time() + 120
+    connected = False
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("localhost", port), timeout=2):
+                connected = True
+                break
+        except OSError:
+            time.sleep(3)
+
+    if not connected:
+        proc.kill()
+        return jsonify({"error": "ETE profile viewer did not start in time."}), 500
+
+    _ete4_ports.add(port)
+    return jsonify({"ok": True, "port": port, "pid": proc.pid})
+
+
+@app.route("/api/compare/go-summary", methods=["POST"])
+def api_compare_go_summary():
+    """Functional GO summary of the differential families: for the A-not-B (or
+    B-not-A) families, over the taxa that carry them, which GO terms do the
+    carrier proteins annotate to. A post-analysis that turns the differential
+    into biology (what functions distinguish the two groups)."""
+    data = request.json or {}
+    grp = _lookup_compare(data.get("token"))
+    if not grp:
+        return jsonify({"error": "Run the comparison first."}), 400
+
+    which = (data.get("which") or "a_not_b").strip()
+    if which == "b_not_a":
+        fam_names = grp.get("b_not_a_names") or []
+        taxa = grp["b"]
+    else:
+        fam_names = grp.get("a_not_b_names") or []
+        taxa = grp["a"]
+    if not fam_names:
+        return jsonify({"error": "No differential families for this side."}), 400
+
+    try:
+        config = _get_config()
+        res = uni.fetch_go_summary_for_families(
+            grp["version"],
+            fam_names,
+            taxa,
+            evalue_cutoff=grp.get("evalue"),
+            limit=50,
+            db_config=config,
+        )
+    except Exception as e:
+        return jsonify({"error": f"GO summary failed: {e}"}), 500
+
+    total = res.get("total_proteins", 0) or 0
+    terms = []
+    for t in res.get("terms", []):
+        n = t.get("n_proteins", 0) or 0
+        terms.append(
+            {
+                "go_id": t.get("go_id"),
+                "go_name": t.get("go_name"),
+                "go_namespace": t.get("go_namespace"),
+                "n_proteins": n,
+                "pct": round(100.0 * n / total, 1) if total else 0.0,
+            }
+        )
+    return jsonify(
+        {
+            "which": which,
+            "n_families": len(fam_names),
+            "total_proteins": total,
+            "terms": terms,
+        }
+    )
+
+
+@app.route("/api/compare/multi-group", methods=["POST"])
+def api_compare_multi_group():
+    """Multi-group presence/absence logic. Each group is flagged 'present' or
+    'absent'. A family qualifies when it is present in EVERY 'present' group and
+    absent from EVERY 'absent' group. 'Present in a group' means present in at
+    least one of the group's taxa (OR within a group); the groups combine with
+    AND. Generalises the two-group A-not-B check to N groups."""
+    f = request.form
+    files = request.files
+    ver = f.get("version", DEFAULT_VERSION)
+    ev = f.get("evalue", "").strip()
+    evalue = float(ev) if ev else None
+
+    try:
+        n_groups = int(f.get("n_groups", "0"))
+    except ValueError:
+        n_groups = 0
+    if n_groups < 2:
+        return jsonify({"error": "Define at least two groups."}), 400
+
+    # Resolve each group → DB taxa + its family set.
+    groups = []
+    try:
+        config = _get_config()
+        for i in range(n_groups):
+            ids = f.get(f"group_{i}_ids", "")
+            mode = (f.get(f"group_{i}_mode", "present") or "present").strip()
+            name = (f.get(f"group_{i}_name", "") or f"Group {i + 1}").strip()
+            tree = files.get(f"group_{i}_tree")
+            resolved = _resolve_taxon_group(ids, tree)
+            if not resolved:
+                return jsonify(
+                    {"error": f"{name}: no taxa provided (IDs and/or a tree)."}
+                ), 400
+            db_taxa = uni.fetch_db_taxa(ver, sorted(resolved), db_config=config)
+            if not db_taxa:
+                return jsonify(
+                    {
+                        "error": f"{name}: none of the {len(resolved)} resolved taxa "
+                        f"are in the reference database for version {ver}."
+                    }
+                ), 400
+            fams = uni.fetch_families_for_taxa(
+                ver, db_taxa, evalue_cutoff=evalue, db_config=config
+            )
+            fam_names = {r["hmm_name"] for r in fams}
+            groups.append(
+                {
+                    "name": name,
+                    "mode": "absent" if mode == "absent" else "present",
+                    "db_taxa": list(db_taxa),
+                    "n_resolved": len(resolved),
+                    "n_db": len(db_taxa),
+                    "fam_names": fam_names,
+                }
+            )
+    except Exception as e:
+        return jsonify({"error": f"Multi-group query failed: {e}"}), 500
+
+    present = [g for g in groups if g["mode"] == "present"]
+    absent = [g for g in groups if g["mode"] == "absent"]
+    if not present:
+        return jsonify({"error": "At least one group must be marked 'present'."}), 400
+
+    # Present in every 'present' group (AND), absent from every 'absent' group.
+    qualifying = set(present[0]["fam_names"])
+    for g in present[1:]:
+        qualifying &= g["fam_names"]
+    for g in absent:
+        qualifying -= g["fam_names"]
+
+    # Counts for the qualifying families over the union of the present-group taxa.
+    present_taxa = sorted({t for g in present for t in g["db_taxa"]})
+    families = []
+    if qualifying:
+        try:
+            inv = uni.fetch_families_for_taxa(
+                ver, present_taxa, evalue_cutoff=evalue, db_config=config
+            )
+        except Exception as e:
+            return jsonify({"error": f"Family count lookup failed: {e}"}), 500
+        for r in inv:
+            if r["hmm_name"] in qualifying:
+                families.append(
+                    {
+                        "hmm_name": r["hmm_name"],
+                        "hmm_accession": r.get("hmm_accession"),
+                        "hmm_type": r.get("hmm_type"),
+                        "n_taxa": r["n_taxa"],
+                        "n_proteins": r["n_proteins"],
+                    }
+                )
+        families.sort(key=lambda r: r["n_taxa"], reverse=True)
+
+    # Colour each group for the summary legend + the tree.
+    colors = [_MULTI_COLORS[i % len(_MULTI_COLORS)] for i in range(len(groups))]
+
+    # Inline heatmap: the top qualifying families across the union of ALL groups'
+    # taxa, so presence (in present groups) vs absence (in absent groups) shows.
+    top_names = [r["hmm_name"] for r in families[:40]]
+    union_all = sorted({t for g in groups for t in g["db_taxa"]})
+    heatmap_b64 = None
+    heatmap_note = None
+    if not top_names:
+        heatmap_note = "No qualifying families — nothing to plot."
+    else:
+        try:
+            import pandas as pd
+
+            pa_rows = uni.fetch_presence_absence_matrix(
+                ver, top_names, taxon_ids=union_all, evalue_cutoff=evalue,
+                db_config=config,
+            )
+            if not pa_rows:
+                heatmap_note = "No presence data found for the qualifying families."
+            else:
+                df = pd.DataFrame(pa_rows)
+                df["taxon_label"] = df.apply(
+                    lambda r: f"{r['taxon_id']} · {r.get('scientific_name') or ''}".strip(
+                        " ·"
+                    ),
+                    axis=1,
+                )
+                matrix = df.pivot_table(
+                    index="taxon_label",
+                    columns="hmm_name",
+                    values="protein_count",
+                    aggfunc="sum",
+                    fill_value=0,
+                )
+                _MAX_HEATMAP_ROWS = 60
+                if matrix.shape[0] > _MAX_HEATMAP_ROWS:
+                    keep = (
+                        matrix.sum(axis=1)
+                        .sort_values(ascending=False)
+                        .index[:_MAX_HEATMAP_ROWS]
+                    )
+                    heatmap_note = (
+                        f"Showing the {_MAX_HEATMAP_ROWS} taxa carrying the most of "
+                        f"these families (of {matrix.shape[0]} taxa)."
+                    )
+                    matrix = matrix.loc[keep]
+                if matrix.shape[0] >= 2 and matrix.shape[1] >= 1:
+                    buf = viz.draw_presence_absence_heatmap(
+                        matrix,
+                        title="Qualifying families across all groups' taxa",
+                        cluster=(matrix.shape[0] >= 2 and matrix.shape[1] >= 2),
+                    )
+                    buf.seek(0)
+                    heatmap_b64 = base64.b64encode(buf.read()).decode()
+                else:
+                    heatmap_note = (
+                        "Heatmap needs at least 2 taxa carrying the qualifying "
+                        f"families (only {matrix.shape[0]} found)."
+                    )
+        except Exception:
+            heatmap_b64 = None
+            heatmap_note = "Could not render the heatmap for this result."
+
+    # Stash for the interactive profile-tree endpoint.
+    token = uuid.uuid4().hex[:12]
+    _multi_groups[token] = {
+        "version": ver,
+        "evalue": evalue,
+        "qualifying_names": [r["hmm_name"] for r in families],
+        "groups": [
+            {"name": g["name"], "mode": g["mode"], "db_taxa": g["db_taxa"]}
+            for g in groups
+        ],
+        "owner": _current_owner(),
+    }
+
+    return jsonify(
+        {
+            "token": token,
+            "groups": [
+                {
+                    "name": g["name"],
+                    "mode": g["mode"],
+                    "n_resolved": g["n_resolved"],
+                    "n_db": g["n_db"],
+                    "n_families": len(g["fam_names"]),
+                    "color": colors[i],
+                }
+                for i, g in enumerate(groups)
+            ],
+            "n_qualifying": len(families),
+            "families": families,
+            "heatmap": heatmap_b64,
+            "heatmap_note": heatmap_note,
+        }
+    )
+
+
+@app.route("/api/compare/multi-profile-tree", methods=["POST"])
+def api_compare_multi_profile_tree():
+    """Interactive ETE profile viewer for a multi-group query: the NCBI species
+    tree of the union of all groups, coloured per group, with an aligned heatmap
+    track of the qualifying families."""
+    data = request.json or {}
+    grp = _lookup_multi(data.get("token"))
+    if not grp:
+        return jsonify({"error": "Run the multi-group query first."}), 400
+
+    fam_names = (grp.get("qualifying_names") or [])[:40]
+    if not fam_names:
+        return jsonify({"error": "No qualifying families to profile."}), 400
+
+    union_taxa = _cap_multi_taxa(grp["groups"])
+    cmap = _multi_colormap(grp["groups"])
+    if len(union_taxa) < 2:
+        return jsonify({"error": "Not enough taxa to draw a tree."}), 400
+
+    ver = grp["version"]
+    evalue = grp.get("evalue")
+    try:
+        config = _get_config()
+        pa_rows = uni.fetch_presence_absence_matrix(
+            ver, fam_names, taxon_ids=union_taxa, evalue_cutoff=evalue, db_config=config
+        )
+    except Exception as e:
+        return jsonify({"error": f"Could not build the profile matrix: {e}"}), 500
+    if not pa_rows:
+        return jsonify({"error": "No presence data found for these families."}), 404
+
+    counts, labels = {}, {}
+    for r in pa_rows:
+        tid = str(r["taxon_id"])
+        counts.setdefault(tid, {})[r["hmm_name"]] = r.get("protein_count", 0) or 0
+        if tid not in labels:
+            sci = (r.get("scientific_name") or "").strip()
+            labels[tid] = f"{tid}  {sci}".strip()
+    for t in union_taxa:
+        tid = str(t)
+        counts.setdefault(tid, {})
+        labels.setdefault(tid, tid)
+
+    import csv as _csv
+    import io as _io
+
+    buf = _io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow(["label"] + fam_names)
+    for tid, label in labels.items():
+        writer.writerow(
+            [label] + [counts.get(tid, {}).get(fam, 0) for fam in fam_names]
+        )
+    matrix_csv = buf.getvalue()
+
+    try:
+        port = _find_free_port()
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
+
+    mat_tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False)
+    mat_tmp.write(matrix_csv)
+    mat_tmp.close()
+
+    cmap_tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".colormap.txt", delete=False
+    )
+    # colormap covers the full union; keep only the taxa we actually render
+    kept = {str(t) for t in union_taxa}
+    cmap_tmp.write(
+        "\n".join(f"{tid}\t{col}" for tid, col in cmap.items() if tid in kept)
+    )
+    cmap_tmp.close()
+
+    cmd = [
+        sys.executable,
+        "ete_highres_profile.py",
+        "-m",
+        mat_tmp.name,
+        "-c",
+        cmap_tmp.name,
+        "-p",
+        str(port),
+    ]
+    env = os.environ.copy()
+    env["QT_QPA_PLATFORM"] = "offscreen"
+    os.system(f"fuser -k {port}/tcp >/dev/null 2>&1")
+    proc = subprocess.Popen(cmd, env=env)
+
+    deadline = time.time() + 120
+    connected = False
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("localhost", port), timeout=2):
+                connected = True
+                break
+        except OSError:
+            time.sleep(3)
+
+    if not connected:
+        proc.kill()
+        return jsonify({"error": "ETE profile viewer did not start in time."}), 500
 
     _ete4_ports.add(port)
     return jsonify({"ok": True, "port": port, "pid": proc.pid})
@@ -1920,6 +2457,35 @@ def api_accession_lookup():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/clade-fasta", methods=["POST"])
+def api_clade_fasta():
+    """FASTA for the sequences under a tree clade, from the ETE4 viewer's
+    right-click menu. Leaf names are '{taxid}.{accession}', so the accession is
+    the part after the first dot; sequences are fetched by accession."""
+    data = request.json or {}
+    ver = (data.get("version") or "").strip() or DEFAULT_VERSION
+    leaves = data.get("leaves", []) or []
+    accs = []
+    for leaf in leaves:
+        s = str(leaf).strip()
+        if not s:
+            continue
+        accs.append(s.split(".", 1)[1] if "." in s else s)
+    accs = list(dict.fromkeys(accs))  # dedupe, keep order
+    if not accs:
+        return jsonify({"error": "No leaf accessions in the selected clade."}), 400
+    try:
+        config = _get_config()
+        records = uni.fetch_sequences_by_accession(ver, accs, db_config=config)
+        if not records:
+            return jsonify({"error": "No sequences found for this clade in the database."}), 404
+        with uni.UniProtRetriever(config) as db:
+            fasta = db.to_fasta_string(records)
+        return jsonify({"fasta": fasta, "count": len(records)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/domain-lookup", methods=["POST"])
 def api_domain_lookup():
     data = request.json or {}
@@ -2411,8 +2977,10 @@ def ete4_gui():
   (function(){{
     var p = new URLSearchParams(location.search);
     window.__fork_pfam = p.get('pfam') || '';
+    window.__fork_version = p.get('version') || '';
     p.delete('port');
     p.delete('pfam');
+    p.delete('version');
     var qs = p.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
   }})();

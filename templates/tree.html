@@ -89,10 +89,7 @@
             <label for="prefix">Output prefix</label>
             <input type="text" id="prefix" placeholder="e.g. myrun">
           </div>
-          <div class="form-group">
-            <label for="output-dir">Output directory (optional)</label>
-            <input type="text" id="output-dir" placeholder="/path/to/results">
-          </div>
+          <input type="hidden" id="output-dir" value="">
         </div>
         <div class="form-row three">
           <div class="form-group">
@@ -116,10 +113,7 @@
           </div>
         </div>
         <div class="form-row">
-          <div class="form-group">
-            <label for="cpu">Threads</label>
-            <input type="number" id="cpu" value="4" min="1" max="64">
-          </div>
+          <input type="hidden" id="cpu" value="4">
           <div class="form-group" style="justify-content:flex-end;padding-top:18px;">
             <label class="checkbox-item">
               <input type="checkbox" id="no-ncbi" checked>
@@ -128,8 +122,9 @@
           </div>
         </div>
         <div class="form-group">
-          <label for="local-fasta">Local FASTA path (optional)</label>
-          <input type="text" id="local-fasta" placeholder="/path/to/seqs.fa">
+          <label for="combine-fasta">Combine with FASTA (optional)</label>
+          <input type="file" id="combine-fasta" class="file-input" accept=".fa,.fasta,.faa,.txt">
+          <span class="hint">Headers must be {taxid}.{accession}, e.g. &gt;9606.P04637 — built into the same tree as the Pfam above.</span>
         </div>
         <div class="form-group">
           <label for="colormap-file">Custom colormap (optional, taxid &lt;tab&gt; color per line)</label>
@@ -287,7 +282,8 @@ async function runTree() {
     fd.append('pfam_source', document.getElementById('pfam-source').value);
     fd.append('pfam_logic', document.getElementById('pfam-logic').value);
     fd.append('color_by', document.getElementById('color-by').value);
-    fd.append('local_fasta', document.getElementById('local-fasta').value.trim());
+    const combineFasta = document.getElementById('combine-fasta').files[0];
+    if (combineFasta) fd.append('combine_fasta', combineFasta);
 
     if (document.getElementById('use-evalue').checked) {
         fd.append('evalue', document.getElementById('evalue').value);
@@ -385,7 +381,8 @@ function showResult(data) {
 
     if (viewer === 'ete4') {
         showEl('tree-ete4-section');
-        document.getElementById('ete4-iframe').src = `/ete4/gui?port=${data.port}&tree=tree-1`;
+        const _v = encodeURIComponent(document.getElementById('ver').value.trim());
+        document.getElementById('ete4-iframe').src = `/ete4/gui?port=${data.port}&tree=tree-1&version=${_v}`;
     } else if (viewer === 'ete4_static') {
         loadStaticImage();
     }

@@ -1,27 +1,30 @@
 """
-Interactive ETE4 species tree coloured by comparison group.
+NCBI species tree coloured by comparison group — used by FORK's Comparative
+("concept check") tab.
 
-Used by FORK's Comparative ("concept check") tab: given a list of taxids and a
-taxid→colour map (group A vs group B vs both), build the NCBI topology and open
-it in the ETE4 smartview explorer with branches coloured by group.
+Two modes, both run as a subprocess by app.py so the Qt/ETE machinery never
+touches the Flask request threads (Qt rendering off the main thread can crash
+the whole process):
 
-Modelled on ete_profile.py's smartview usage so it matches the installed ETE4
-version's API.
-
+    # interactive ETE4 smartview explorer (default)
     python ete_species_tree.py -t taxids.txt -c colormap.txt -p 5001
 
-    taxids.txt   one taxid per line
+    # static PNG render (Qt treeview) -> outfile
+    python ete_species_tree.py -t taxids.txt -c colormap.txt --render out.png
+
+    taxids.txt    one taxid per line
     colormap.txt  "<taxid>\\t<hexcolour>" per line
 """
 
 import argparse
+import sys
 from ete4 import NCBITaxa
-from ete4.smartview import Layout, TextFace
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-t", "--taxids", required=True, help="one taxid per line")
 parser.add_argument("-c", "--colormap", required=True, help="taxid<tab>hexcolour per line")
-parser.add_argument("-p", "--port", type=int, default=5001)
+parser.add_argument("-p", "--port", type=int, default=5001, help="port (interactive mode)")
+parser.add_argument("--render", help="render a static PNG to this path and exit")
 args = parser.parse_args()
 
 # ---- inputs -------------------------------------------------------------
@@ -39,22 +42,65 @@ for line in open(args.colormap):
 
 # ---- NCBI species tree --------------------------------------------------
 ncbi = NCBITaxa()
-tree = ncbi.get_topology(taxids)
+tree = ncbi.get_topology(taxids, intermediate_nodes=False)
 tree.annotate_ncbi_taxa(taxid_attr="taxid")
 
-# Pre-assign a branch colour to every node: a leaf takes its group's colour;
-# an internal node takes the shared colour only if all its leaves agree.
+
+def _node_color(node):
+    """Group colour for a node: a leaf takes its own; an internal node takes
+    the shared colour only when all its leaves agree."""
+    if node.is_leaf:
+        return taxid2color.get(str(node.props.get("taxid", "")))
+    cols = {taxid2color.get(str(l.props.get("taxid", ""))) for l in node.leaves()}
+    cols.discard(None)
+    return next(iter(cols)) if len(cols) == 1 else None
+
+
+# Pre-assign the colour as a prop so both renderers can read it.
 for _node in tree.traverse():
-    if _node.is_leaf:
-        _col = taxid2color.get(str(_node.props.get("taxid", "")))
-    else:
-        _cols = {
-            taxid2color.get(str(_l.props.get("taxid", ""))) for _l in _node.leaves()
-        }
-        _cols.discard(None)
-        _col = next(iter(_cols)) if len(_cols) == 1 else None
+    _col = _node_color(_node)
     if _col:
         _node.add_prop("branch_color", _col)
+
+
+# =========================================================================
+# STATIC PNG (Qt treeview) — runs in this subprocess's main thread
+# =========================================================================
+if args.render:
+    from ete4.treeview import TreeStyle, NodeStyle, TextFace as TVTextFace
+
+    for _n in tree.traverse():
+        _n.dist = 0.0
+    tree.to_ultrametric(topological=True)
+
+    for node in tree.traverse():
+        ns = NodeStyle()
+        ns["hz_line_width"] = 4
+        ns["vt_line_width"] = 4
+        ns["size"] = 0
+        col = node.props.get("branch_color")
+        if col:
+            ns["hz_line_color"] = col
+            ns["vt_line_color"] = col
+        node.set_style(ns)
+        if node.is_leaf:
+            label = node.props.get("sci_name", node.name)
+            node.add_face(
+                TVTextFace(f"  {label} ({node.props.get('taxid', node.name)})"),
+                column=0,
+                position="branch-right",
+            )
+
+    ts = TreeStyle()
+    ts.show_leaf_name = False
+    tree.render(args.render, w=2000, units="px", tree_style=ts)
+    sys.exit(0)
+
+
+# =========================================================================
+# INTERACTIVE ETE4 smartview explorer
+# =========================================================================
+from ete4.smartview import Layout, TextFace
 
 
 def branch_col(node):
@@ -66,11 +112,19 @@ def branch_col(node):
 
 
 def scientific_name_layout(node):
+    if not node.is_leaf:
+        return
     if "sci_name" in node.props:
         label = f"{node.props['sci_name']} ({node.props.get('taxid', node.name)})"
     else:
         label = str(node.name)
     return TextFace(label, position="right", fs_min=6, fs_max=25)
+
+
+def clade_name_layout(node):
+    if node.is_leaf or "sci_name" not in node.props:
+        return
+    return TextFace(str(node.props["sci_name"]), position="right", fs_min=6, fs_max=25)
 
 
 my_tree_style = {
@@ -104,6 +158,7 @@ tree.explore(
         Layout(name="example", draw_tree=my_tree_style),
         Layout(name="group colours", draw_node=branch_col),
         Layout(name="scientific names", draw_node=scientific_name_layout),
+        Layout(name="clade names", active=False, draw_node=clade_name_layout),
     ],
     port=args.port,
     open_browser=False,

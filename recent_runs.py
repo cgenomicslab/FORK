@@ -68,6 +68,7 @@ def _job_entry(job_id, job):
         "status": _STATUS_MAP.get(job.get("status"), job.get("status") or "—"),
         "output": meta.get("output", ""),
         "type": job.get("type", ""),  # 'highres_trees' or 'tree' — lets the dashboard link back
+        "owner": job.get("owner"),    # per-user run isolation (None = legacy, shown to all)
     }
 
 
@@ -94,12 +95,16 @@ def _save_history(hist):
     return hist
 
 
-def collect(jobs=None, limit=12):
+def collect(jobs=None, limit=12, owner=None):
     """
     Merge live jobs with the persisted history, newest first.
 
     A live job always wins over its stored copy, so a run flips from
     'building' to 'done' (and gains a real leaf count) as it progresses.
+
+    If ``owner`` is given, only that owner's runs are returned (legacy runs
+    with no recorded owner stay visible to everyone, so nothing that already
+    worked disappears).
     """
     hist = _load_history()
     if jobs:
@@ -108,4 +113,6 @@ def collect(jobs=None, limit=12):
     hist = _save_history(hist)
 
     entries = sorted(hist.values(), key=lambda e: e.get("mtime", 0), reverse=True)
+    if owner is not None:
+        entries = [e for e in entries if e.get("owner") in (None, owner)]
     return entries[:limit]

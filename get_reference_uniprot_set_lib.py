@@ -462,12 +462,16 @@ class UniProtRetriever:
         with that term, with counts.
         """
         evalue_clause = "AND h.full_evalue <= %s" if evalue_cutoff is not None else ""
+        # Join protein_go straight to hmm_search_results on (accession, version).
+        # The proteins table in the middle was only linking accession -> accession
+        # (redundant, since pg.accession == h.accession), so dropping it removes a
+        # ~50 GB table from the join for identical results.
         query = f"""
             SELECT h.hmm_name, h.hmm_accession,
-                COUNT(DISTINCT p.accession) AS protein_count
+                COUNT(DISTINCT h.accession) AS protein_count
             FROM   protein_go pg
-            JOIN   proteins p ON pg.accession = p.accession AND pg.version = p.version
-            JOIN   hmm_search_results h ON p.accession = h.accession AND p.version = h.version
+            JOIN   hmm_search_results h
+                   ON h.accession = pg.accession AND h.version = pg.version
             WHERE  pg.version = %s
             AND    pg.go_id = %s
             {evalue_clause}
@@ -585,6 +589,102 @@ class UniProtRetriever:
             row["scientific_name"] = taxon_name_map.get(row["taxon_id"])
 
         return rows
+
+    # ------------------------------------------------------------------
+    # GO functional summary of a set of families within a set of taxa
+    # ------------------------------------------------------------------
+
+    def get_go_summary_for_families(
+        self,
+        version,
+        pfam_queries,
+        taxon_ids,
+        evalue_cutoff=None,
+        limit=50,
+        chunk_size=5000,
+    ):
+        """Functional GO summary of the proteins that carry `pfam_queries`
+        within `taxon_ids`.
+
+        For every GO term annotated on those proteins, count how many distinct
+        proteins carry it. Returns the most frequent terms plus the total number
+        of distinct proteins in the set, so the UI can show the fraction
+        (n_proteins / total_proteins) as a functional-enrichment readout.
+
+
+
+        Taxa are chunked; because a protein belongs to exactly one taxon, the
+        chunks cover disjoint protein sets, so the per-chunk distinct counts sum
+        exactly (same reasoning as `get_families_for_taxa`).
+        """
+        if isinstance(pfam_queries, str):
+            pfam_queries = [pfam_queries]
+        if not pfam_queries or not taxon_ids:
+            return {"total_proteins": 0, "terms": []}
+
+        taxon_ids = sorted({int(t) for t in taxon_ids})
+        pfam_conditions = " OR ".join(
+            ["(h.hmm_name = %s OR h.hmm_accession LIKE %s)"] * len(pfam_queries)
+        )
+        evalue_clause = "AND h.full_evalue <= %s" if evalue_cutoff is not None else ""
+
+        go_agg = {}  # go_id -> {go_name, go_namespace, n_proteins}
+        total_proteins = 0
+        try:
+            for i in range(0, len(taxon_ids), chunk_size):
+                chunk = taxon_ids[i : i + chunk_size]
+                tax_ph = ", ".join(["%s"] * len(chunk))
+
+                params = [version]
+                if evalue_cutoff is not None:
+                    params.append(evalue_cutoff)
+                for q in pfam_queries:
+                    params.extend([q, f"{q}%"])
+                params.extend(chunk)
+
+                go_query = f"""
+                    SELECT   gt.go_id,
+                             gt.go_name,
+                             gt.go_namespace,
+                             COUNT(DISTINCT pg.accession) AS n_proteins
+                    FROM     hmm_search_results h
+                    JOIN     protein_go pg
+                             ON pg.accession = h.accession
+                            AND pg.version   = h.version
+                    JOIN     go_terms gt ON gt.go_id = pg.go_id
+                    WHERE    h.version = %s
+                      {evalue_clause}
+                      AND ({pfam_conditions})
+                      AND    h.taxon_id IN ({tax_ph})
+                    GROUP BY gt.go_id, gt.go_name, gt.go_namespace
+                """
+                self.cursor.execute(go_query, tuple(params))
+                for r in self.cursor.fetchall():
+                    key = r["go_id"]
+                    if key in go_agg:
+                        go_agg[key]["n_proteins"] += r["n_proteins"]
+                    else:
+                        go_agg[key] = dict(r)
+
+                # total distinct proteins carrying the families in this chunk
+                cnt_query = f"""
+                    SELECT COUNT(DISTINCT h.accession) AS n
+                    FROM   hmm_search_results h
+                    WHERE  h.version = %s
+                      {evalue_clause}
+                      AND ({pfam_conditions})
+                      AND  h.taxon_id IN ({tax_ph})
+                """
+                self.cursor.execute(cnt_query, tuple(params))
+                row = self.cursor.fetchone()
+                total_proteins += row["n"] if row and row.get("n") else 0
+        except mysql.connector.Error as err:
+            raise RuntimeError(f"Database query failed: {err}") from err
+
+        terms = sorted(go_agg.values(), key=lambda r: r["n_proteins"], reverse=True)[
+            :limit
+        ]
+        return {"total_proteins": total_proteins, "terms": terms}
 
     # ------------------------------------------------------------------
     # Family inventory for a set of taxa  (comparative "concept check")
@@ -1619,6 +1719,17 @@ def fetch_families_for_taxa(version, taxon_ids, evalue_cutoff=None, db_config=No
     config = db_config or get_db_config()
     with UniProtRetriever(config) as db:
         return db.get_families_for_taxa(version, taxon_ids, evalue_cutoff)
+
+
+def fetch_go_summary_for_families(
+    version, pfam_queries, taxon_ids, evalue_cutoff=None, limit=50, db_config=None
+):
+    """One-call helper: GO functional summary of a set of families in a taxon set."""
+    config = db_config or get_db_config()
+    with UniProtRetriever(config) as db:
+        return db.get_go_summary_for_families(
+            version, pfam_queries, taxon_ids, evalue_cutoff, limit
+        )
 
 
 def fetch_db_taxa(version, taxon_ids, db_config=None):

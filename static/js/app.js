@@ -31,7 +31,12 @@ function makeTable(rows, columns) {
         cols.forEach(c => {
             const v = row[c];
             const display = v === null || v === undefined ? '' : String(v);
-            html += `<td title="${display}">${display}</td>`;
+            if (c === 'accession' && display) {
+                const url = 'https://www.uniprot.org/uniprotkb/' + encodeURIComponent(display) + '/entry';
+                html += `<td title="View ${display} on UniProt"><a href="${url}" target="_blank" rel="noopener">${display}</a></td>`;
+            } else {
+                html += `<td title="${display}">${display}</td>`;
+            }
         });
         html += '</tr>';
     });

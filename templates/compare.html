@@ -63,6 +63,22 @@
 
     <button class="btn btn-primary btn-run" id="cmp-run-btn" onclick="runComparison()">Compare</button>
     <div id="cmp-alert" class="hidden" style="margin-top:10px;"></div>
+
+    <div class="form-section" style="margin-top:18px;">
+      <div class="form-section-header">Multi-group query (advanced)</div>
+      <div class="form-section-body">
+        <p class="hint" style="margin-bottom:10px;">
+          Define several groups and mark each “present” or “absent”. A family
+          qualifies when it is present in <em>every</em> present group (present =
+          in at least one taxon of the group) and absent from <em>every</em>
+          absent group. E.g. present in group 1, absent in groups 2 and 3.
+        </p>
+        <div id="mg-groups"></div>
+        <button class="btn btn-secondary btn-sm" onclick="mgAddGroup()">+ Add group</button>
+        <button class="btn btn-primary btn-sm" id="mg-run-btn" onclick="runMultiGroup()" style="margin-top:8px;">Run multi-group</button>
+        <div id="mg-alert" class="hidden" style="margin-top:10px;"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Right: results -->
@@ -145,6 +161,58 @@
         </div>
       </div>
 
+      <!-- Interactive profile viewer -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header">
+          <h2>Interactive profile (species tree + differential families)</h2>
+        </div>
+        <div class="card-body">
+          <p class="text-muted text-sm" style="margin-bottom:10px;">
+            The NCBI species tree of both groups with an aligned heatmap of the top
+            differential families. Group-A taxa carry the families (A-not-B); group-B
+            taxa read as absent — so presence/absence is visible per lineage. Branches:
+            <span style="color:var(--accent);font-weight:600;">■ A only</span> &nbsp;
+            <span style="color:var(--warning);font-weight:600;">■ B only</span> &nbsp;
+            <span style="color:var(--info);font-weight:600;">■ both</span>.
+          </p>
+          <div class="flex gap-8" style="margin-bottom:10px;">
+            <select id="cmp-profile-which" class="input input-sm" style="max-width:220px;">
+              <option value="a_not_b">Families in A, absent in B</option>
+              <option value="b_not_a">Families in B, absent in A</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" id="cmp-profile-btn" onclick="openCompareProfile()">Open profile viewer</button>
+          </div>
+          <div id="cmp-profile-alert" class="hidden" style="margin-bottom:8px;"></div>
+          <div id="cmp-profile-viewer" class="hidden"></div>
+        </div>
+      </div>
+
+      <!-- GO functional summary -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header">
+          <h2>GO functional summary of the differential</h2>
+        </div>
+        <div class="card-body">
+          <p class="text-muted text-sm" style="margin-bottom:10px;">
+            The Gene Ontology terms most carried by the proteins behind the
+            differential families — a functional read-out of what distinguishes
+            the two groups. Percentages are the share of the differential proteins
+            annotated with each term.
+          </p>
+          <div class="flex gap-8" style="margin-bottom:10px;">
+            <select id="cmp-go-which" class="input input-sm" style="max-width:220px;">
+              <option value="a_not_b">Families in A, absent in B</option>
+              <option value="b_not_a">Families in B, absent in A</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" id="cmp-go-btn" onclick="runCompareGo()">Run GO summary</button>
+            <button class="btn btn-secondary btn-sm hidden" id="cmp-go-dl" onclick="downloadCompareGo()">Download CSV</button>
+          </div>
+          <div id="cmp-go-alert" class="hidden" style="margin-bottom:8px;"></div>
+          <div id="cmp-go-note" class="text-muted text-sm hidden" style="margin-bottom:8px;"></div>
+          <div id="cmp-go-table"></div>
+        </div>
+      </div>
+
       <!-- Reverse + shared -->
       <div class="card" style="margin-bottom:16px;">
         <div class="card-header">
@@ -164,8 +232,53 @@
       </div>
 
     </div>
+
+    <!-- Multi-group results (independent of the two-group compare above) -->
+    <div id="mg-results" class="hidden">
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header"><h2>Multi-group — groups</h2></div>
+        <div class="card-body"><div id="mg-summary"></div></div>
+      </div>
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-header">
+          <h2 id="mg-fam-title">Qualifying families</h2>
+          <button class="btn btn-secondary btn-sm hidden" id="mg-dl" onclick="downloadMultiGroup()">Download CSV</button>
+        </div>
+        <div class="card-body"><div id="mg-fam-table"></div></div>
+      </div>
+
+      <!-- Multi-group heatmap -->
+      <div id="mg-heatmap-card" class="card hidden" style="margin-bottom:16px;">
+        <div class="card-header">
+          <h2>Heatmap — qualifying families</h2>
+          <button class="btn btn-secondary btn-sm" onclick="downloadMultiHeatmap()">Download PNG</button>
+        </div>
+        <div class="card-body">
+          <div id="mg-heatmap-note" class="text-muted text-sm hidden" style="margin-bottom:8px;"></div>
+          <div id="mg-heatmap-img"></div>
+        </div>
+      </div>
+
+      <!-- Multi-group interactive profile -->
+      <div id="mg-profile-card" class="card hidden">
+        <div class="card-header"><h2>Interactive profile (species tree + qualifying families)</h2></div>
+        <div class="card-body">
+          <p id="mg-legend" class="text-muted text-sm" style="margin-bottom:10px;"></p>
+          <button class="btn btn-secondary btn-sm" id="mg-profile-btn" onclick="openMultiProfile()">Open profile viewer</button>
+          <div id="mg-profile-alert" class="hidden" style="margin:8px 0;"></div>
+          <div id="mg-profile-viewer" class="hidden" style="margin-top:10px;"></div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
+
+<style>
+  .fam-scroll { max-height: 360px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+  .fam-scroll table { margin: 0; }
+  .fam-scroll thead th { position: sticky; top: 0; z-index: 1; background: var(--bg-section); }
+</style>
 
 <script>
   let cmpState = { token: null, a_not_b: [], b_not_a: [], heatmap: null, drill: null };
@@ -173,7 +286,11 @@
   // Family table with a clickable n_proteins count (drills down to accessions).
   function renderFamilyTable(rows, which) {
     if (!rows || !rows.length) return '<p class="text-muted">None.</p>';
-    let html = '<div class="table-wrapper"><table><thead><tr>' +
+    const n = rows.length;
+    let html = `<div class="text-muted text-sm" style="margin-bottom:6px;">`
+      + `${n.toLocaleString()} famil${n === 1 ? 'y' : 'ies'} — scroll within the box to see all; `
+      + `use “Download CSV” for the full list.</div>`;
+    html += '<div class="fam-scroll"><table><thead><tr>' +
       '<th>hmm_name</th><th>hmm_accession</th><th>hmm_type</th><th>n_taxa</th><th>n_proteins</th>' +
       '</tr></thead><tbody>';
     rows.forEach(r => {
@@ -275,6 +392,15 @@
 
       cmpState = { token: data.token, a_not_b: data.a_not_b, b_not_a: data.b_not_a, heatmap: data.heatmap };
 
+      // Fresh run → clear any profile viewer / GO summary output from a previous comparison.
+      hideEl('cmp-profile-viewer');
+      document.getElementById('cmp-profile-viewer').innerHTML = '';
+      clearAlert('cmp-profile-alert');
+      hideEl('cmp-go-note'); hideEl('cmp-go-dl');
+      clearAlert('cmp-go-alert');
+      document.getElementById('cmp-go-table').innerHTML = '';
+      cmpGoRows = [];
+
       document.getElementById('cmp-summary').innerHTML = makeTable([
         { Group: 'A — present in', 'Taxa (query)': data.group_a.n_taxa_query, 'Taxa (in DB)': data.group_a.n_taxa_db, 'Families': data.group_a.n_families },
         { Group: 'B — absent in', 'Taxa (query)': data.group_b.n_taxa_query, 'Taxa (in DB)': data.group_b.n_taxa_db, 'Families': data.group_b.n_families },
@@ -374,6 +500,255 @@
     } catch (e) {
       btn.disabled = false; btn.textContent = 'Open interactive ETE4';
       showAlert('cmp-sptree-alert', 'error', e.message);
+    }
+  }
+
+  async function openCompareProfile() {
+    if (!cmpState.token) return;
+    const btn = document.getElementById('cmp-profile-btn');
+    const which = document.getElementById('cmp-profile-which').value;
+    btn.disabled = true; btn.textContent = 'Launching profile…';
+    clearAlert('cmp-profile-alert');
+    hideEl('cmp-profile-viewer');
+    try {
+      const res = await fetch('/api/compare/profile-tree', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: cmpState.token, which }),
+      });
+      const data = await res.json();
+      btn.disabled = false; btn.textContent = 'Open profile viewer';
+      if (data.error) { showAlert('cmp-profile-alert', 'error', data.error); return; }
+      document.getElementById('cmp-profile-viewer').innerHTML = `
+        <div class="tree-iframe-wrap" style="height:720px;">
+          <iframe style="width:100%;height:720px;border:none;" src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
+        </div>`;
+      showEl('cmp-profile-viewer');
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Open profile viewer';
+      showAlert('cmp-profile-alert', 'error', e.message);
+    }
+  }
+
+  let cmpGoRows = [];
+
+  async function runCompareGo() {
+    if (!cmpState.token) return;
+    const btn = document.getElementById('cmp-go-btn');
+    const which = document.getElementById('cmp-go-which').value;
+    btn.disabled = true; btn.textContent = 'Running…';
+    clearAlert('cmp-go-alert');
+    hideEl('cmp-go-note'); hideEl('cmp-go-dl');
+    document.getElementById('cmp-go-table').innerHTML = '';
+    try {
+      const res = await fetch('/api/compare/go-summary', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: cmpState.token, which }),
+      });
+      const data = await res.json();
+      btn.disabled = false; btn.textContent = 'Run GO summary';
+      if (data.error) { showAlert('cmp-go-alert', 'error', data.error); return; }
+      cmpGoRows = data.terms || [];
+      const note = document.getElementById('cmp-go-note');
+      note.textContent = `${data.n_families} differential families · `
+        + `${data.total_proteins.toLocaleString()} carrier proteins · `
+        + `top ${cmpGoRows.length} GO terms.`;
+      showEl('cmp-go-note');
+      if (!cmpGoRows.length) {
+        document.getElementById('cmp-go-table').innerHTML =
+          '<p class="text-muted">No GO annotations on the differential proteins.</p>';
+        return;
+      }
+      const rows = cmpGoRows.map(t => ({
+        'GO ID': t.go_id, 'Term': t.go_name || '', 'Namespace': t.go_namespace || '',
+        'Proteins': t.n_proteins, '% of set': t.pct + '%',
+      }));
+      document.getElementById('cmp-go-table').innerHTML = makeTable(rows,
+        ['GO ID', 'Term', 'Namespace', 'Proteins', '% of set']);
+      showEl('cmp-go-dl');
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Run GO summary';
+      showAlert('cmp-go-alert', 'error', e.message);
+    }
+  }
+
+  function downloadCompareGo() {
+    if (!cmpGoRows.length) return;
+    const header = 'go_id,go_name,go_namespace,n_proteins,pct_of_set\n';
+    const body = cmpGoRows.map(t =>
+      [t.go_id, `"${(t.go_name || '').replace(/"/g, '""')}"`,
+       t.go_namespace || '', t.n_proteins, t.pct].join(',')).join('\n');
+    downloadText('comparative_go_summary.csv', header + body, 'text/csv');
+  }
+
+  // ---- Multi-group presence/absence query -------------------------------
+  let mgCount = 0;
+  let mgFamRows = [];
+  let mgToken = null;
+  let mgHeatmap = null;
+
+  function mgAddGroup(mode, name) {
+    const i = mgCount++;
+    const row = document.createElement('div');
+    row.className = 'mg-group';
+    row.dataset.idx = i;
+    row.style = 'border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:10px;';
+    row.innerHTML = `
+      <div class="flex gap-8" style="align-items:center;margin-bottom:6px;">
+        <input type="text" class="mg-name input input-sm" value="${name || ('Group ' + (i + 1))}" style="max-width:130px;">
+        <select class="mg-mode input input-sm" style="max-width:110px;">
+          <option value="present"${mode === 'absent' ? '' : ' selected'}>present</option>
+          <option value="absent"${mode === 'absent' ? ' selected' : ''}>absent</option>
+        </select>
+        <button class="btn btn-secondary btn-sm mg-del" title="Remove this group">✕</button>
+      </div>
+      <input type="text" class="mg-ids" placeholder="Taxon / clade IDs, comma separated" style="width:100%;margin-bottom:6px;">
+      <input type="file" id="mg-tree-${i}" class="mg-tree file-input" accept=".nwk,.txt,.tree,.treefile">`;
+    row.querySelector('.mg-del').addEventListener('click', () => {
+      row.remove();
+    });
+    document.getElementById('mg-groups').appendChild(row);
+    if (typeof initFileInputs === 'function') initFileInputs();
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // Seed the example shape: present / absent / absent.
+    mgAddGroup('present', 'Group 1');
+    mgAddGroup('absent', 'Group 2');
+    mgAddGroup('absent', 'Group 3');
+  });
+
+  async function runMultiGroup() {
+    const rows = Array.from(document.querySelectorAll('#mg-groups .mg-group'));
+    if (rows.length < 2) {
+      showAlert('mg-alert', 'error', 'Define at least two groups.');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('version', document.getElementById('cmp-ver').value.trim());
+    if (document.getElementById('cmp-use-evalue').checked) {
+      fd.append('evalue', document.getElementById('cmp-evalue').value.trim());
+    }
+    fd.append('n_groups', rows.length);
+    let anyPresent = false, ok = true;
+    rows.forEach((row, i) => {
+      const ids = row.querySelector('.mg-ids').value.trim();
+      const tree = row.querySelector('.mg-tree').files[0];
+      const mode = row.querySelector('.mg-mode').value;
+      const name = row.querySelector('.mg-name').value.trim() || ('Group ' + (i + 1));
+      if (mode === 'present') anyPresent = true;
+      if (!ids && !tree) ok = false;
+      fd.append(`group_${i}_ids`, ids);
+      fd.append(`group_${i}_mode`, mode);
+      fd.append(`group_${i}_name`, name);
+      if (tree) fd.append(`group_${i}_tree`, tree);
+    });
+    if (!ok) { showAlert('mg-alert', 'error', 'Every group needs taxa (IDs and/or a tree).'); return; }
+    if (!anyPresent) { showAlert('mg-alert', 'error', 'Mark at least one group “present”.'); return; }
+
+    clearAlert('mg-alert');
+    const btn = document.getElementById('mg-run-btn');
+    btn.disabled = true; btn.textContent = 'Running…';
+    try {
+      const res = await fetch('/api/compare/multi-group', { method: 'POST', body: fd });
+      const data = await res.json();
+      btn.disabled = false; btn.textContent = 'Run multi-group';
+      if (data.error) { showAlert('mg-alert', 'error', data.error); return; }
+
+      mgToken = data.token;
+      mgHeatmap = data.heatmap || null;
+
+      // Summary table with a colour swatch per group (matches the tree colours).
+      let sumHtml = '<div class="table-wrapper"><table><thead><tr>'
+        + '<th></th><th>Group</th><th>Requirement</th><th>Taxa (resolved)</th>'
+        + '<th>Taxa (in DB)</th><th>Families in group</th></tr></thead><tbody>';
+      data.groups.forEach(g => {
+        sumHtml += '<tr>'
+          + `<td><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${g.color};"></span></td>`
+          + `<td>${g.name}</td><td>${g.mode}</td><td>${g.n_resolved}</td>`
+          + `<td>${g.n_db}</td><td>${g.n_families.toLocaleString()}</td></tr>`;
+      });
+      document.getElementById('mg-summary').innerHTML = sumHtml + '</tbody></table></div>';
+
+      // Heatmap
+      if (mgHeatmap || data.heatmap_note) {
+        if (mgHeatmap) showImage('mg-heatmap-img', mgHeatmap);
+        else document.getElementById('mg-heatmap-img').innerHTML = '';
+        const note = document.getElementById('mg-heatmap-note');
+        if (data.heatmap_note) { note.textContent = data.heatmap_note; showEl('mg-heatmap-note'); }
+        else hideEl('mg-heatmap-note');
+        showEl('mg-heatmap-card');
+      } else { hideEl('mg-heatmap-card'); }
+
+      // Profile viewer card + legend (reset any previous viewer)
+      hideEl('mg-profile-viewer');
+      document.getElementById('mg-profile-viewer').innerHTML = '';
+      clearAlert('mg-profile-alert');
+      document.getElementById('mg-legend').innerHTML = 'Branch colours: '
+        + data.groups.map(g =>
+            `<span style="color:${g.color};font-weight:600;">■ ${g.name} (${g.mode})</span>`
+          ).join(' &nbsp; ');
+      if (data.n_qualifying > 0) showEl('mg-profile-card'); else hideEl('mg-profile-card');
+
+      mgFamRows = data.families || [];
+      document.getElementById('mg-fam-title').textContent =
+        `Qualifying families (${data.n_qualifying})`;
+      document.getElementById('mg-fam-table').innerHTML = mgFamRows.length
+        ? `<div class="text-muted text-sm" style="margin-bottom:6px;">`
+          + `${mgFamRows.length.toLocaleString()} famil${mgFamRows.length === 1 ? 'y' : 'ies'} — `
+          + `scroll within the box to see all; use “Download CSV” for the full list.</div>`
+          + '<div class="fam-scroll">'
+          + makeTable(mgFamRows.map(r => ({
+              hmm_name: r.hmm_name, hmm_accession: r.hmm_accession || '',
+              hmm_type: r.hmm_type || '', n_taxa: r.n_taxa, n_proteins: r.n_proteins,
+            })), ['hmm_name', 'hmm_accession', 'hmm_type', 'n_taxa', 'n_proteins'])
+          + '</div>'
+        : '<p class="text-muted">No families satisfy the presence/absence logic.</p>';
+      if (mgFamRows.length) showEl('mg-dl'); else hideEl('mg-dl');
+      showEl('mg-results');
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Run multi-group';
+      showAlert('mg-alert', 'error', e.message);
+    }
+  }
+
+  function downloadMultiGroup() {
+    if (!mgFamRows.length) return;
+    const header = 'hmm_name,hmm_accession,hmm_type,n_taxa,n_proteins\n';
+    const body = mgFamRows.map(r =>
+      [r.hmm_name, r.hmm_accession || '', r.hmm_type || '', r.n_taxa, r.n_proteins]
+        .join(',')).join('\n');
+    downloadText('multi_group_families.csv', header + body, 'text/csv');
+  }
+
+  function downloadMultiHeatmap() {
+    const img = document.querySelector('#mg-heatmap-img img');
+    if (!img) return;
+    const a = document.createElement('a');
+    a.href = img.src; a.download = 'multi_group_heatmap.png'; a.click();
+  }
+
+  async function openMultiProfile() {
+    if (!mgToken) return;
+    const btn = document.getElementById('mg-profile-btn');
+    btn.disabled = true; btn.textContent = 'Launching profile…';
+    clearAlert('mg-profile-alert');
+    hideEl('mg-profile-viewer');
+    try {
+      const res = await fetch('/api/compare/multi-profile-tree', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: mgToken }),
+      });
+      const data = await res.json();
+      btn.disabled = false; btn.textContent = 'Open profile viewer';
+      if (data.error) { showAlert('mg-profile-alert', 'error', data.error); return; }
+      document.getElementById('mg-profile-viewer').innerHTML = `
+        <div class="tree-iframe-wrap" style="height:720px;">
+          <iframe style="width:100%;height:720px;border:none;" src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
+        </div>`;
+      showEl('mg-profile-viewer');
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Open profile viewer';
+      showAlert('mg-profile-alert', 'error', e.message);
     }
   }
 </script>

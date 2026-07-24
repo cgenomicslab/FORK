@@ -209,7 +209,7 @@ def build_one_tree(
 
     if not cached:
         if progress_callback:
-            progress_callback(f"[{pfam}] running tree_from_db.py...")
+            progress_callback(f"[{pfam}] Aligning sequences and inferring tree…")
         cmd = [
             python_exe or sys.executable,
             tree_from_db_path,
@@ -244,12 +244,12 @@ def build_one_tree(
 
         if proc.returncode != 0:
             result["error"] = (
-                f"tree_from_db.py exited with code {proc.returncode}. " f"Check stderr."
+                f"Tree build failed (exit code {proc.returncode})."
             )
             return result
     else:
         if progress_callback:
-            progress_callback(f"[{pfam}] using cached tree at {tree_path}")
+            progress_callback(f"[{pfam}] Reusing previously built tree…")
 
     if not os.path.isfile(tree_path):
         result["error"] = f"expected tree file missing: {tree_path}"
@@ -307,8 +307,8 @@ def build_trees(
     n = len(entries)
     for i, (label, lf) in enumerate(entries, 1):
         if progress_callback:
-            src = "local FASTA" if lf else "DB"
-            progress_callback(f"({i}/{n}) starting {label} ({src})")
+            src = "uploaded FASTA" if lf else "database"
+            progress_callback(f"Gene tree {i} of {n} — {label} (from {src})")
         results[label] = build_one_tree(
             pfam=label,
             output_root=output_root,
@@ -319,7 +319,8 @@ def build_trees(
         )
         if progress_callback:
             r = results[label]
-            status = "OK" if r["error"] is None else f"ERROR: {r['error']}"
-            tag = "(cached)" if r["cached"] and r["error"] is None else ""
-            progress_callback(f"({i}/{n}) finished {label} {tag} — {status}")
+            ok = r["error"] is None
+            status = "done" if ok else f"failed ({r['error']})"
+            tag = " · reused from cache" if r["cached"] and ok else ""
+            progress_callback(f"Gene tree {i} of {n} — {label}: {status}{tag}")
     return results

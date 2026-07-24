@@ -121,11 +121,13 @@ class SequenceStreamer:
     and streams them in chunks for memory to process them.
     """
 
-    def __init__(self, version, output_dir, taxon_ids=None, proteome_ids=None):
+    def __init__(self, version, output_dir, taxon_ids=None, proteome_ids=None,
+                 reuse_prior=False):
         self.version = version
         self.output_dir = Path(output_dir)
         self.taxon_ids = taxon_ids
         self.proteome_ids = proteome_ids
+        self.reuse_prior = reuse_prior
 
         self.config = {
             "host": os.getenv("DB_HOST", "localhost"),
@@ -159,6 +161,15 @@ class SequenceStreamer:
             WHERE  p.version = %s
         """
         params = [self.version]
+
+        # REUSE-PRIOR: only search sequences NOT already present in an earlier
+        # (already fully-searched) version. The rest are copied, not re-searched.
+        if self.reuse_prior:
+            query += (
+                " AND NOT EXISTS (SELECT 1 FROM proteins pp "
+                "WHERE pp.seq_id = p.seq_id AND pp.version <> %s)"
+            )
+            params.append(self.version)
 
         if self.taxon_ids:
             placeholders = ", ".join(["%s"] * len(self.taxon_ids))
@@ -331,6 +342,100 @@ class HMMResultsImporter:
             cursor.close()
             conn.close()
 
+    # --------- REUSE-PRIOR: copy results for unchanged sequences ---------
+    def copy_prior_hits(self, taxon_ids=None, proteome_ids=None):
+        """
+        For proteins in this version whose sequence (seq_id) already exists in a
+        PRIOR, fully-searched version, COPY the existing HMM hits instead of
+        re-searching. The hit set depends only on the sequence, so it is
+        identical; we re-stamp it with the new protein's accession / taxon /
+        proteome. Correct-by-construction, but VALIDATE on a small subset first.
+
+        Batched by proteome (transactions stay small) and checkpointed, so an
+        interruption resumes without duplicating rows. Returns rows copied.
+        """
+        copy_ckpt = self.output_dir / f"copied_proteomes_{self.version}.txt"
+        done = set(copy_ckpt.read_text().split()) if copy_ckpt.exists() else set()
+
+        conn = mysql.connector.connect(**self.config)
+        cur = conn.cursor()
+        try:
+            # One representative prior (accession, version) per seq_id. All prior
+            # proteins with a given seq_id have identical hits, so any single one
+            # works — and using exactly one avoids multiplying the copied rows.
+            cur.execute("DROP TEMPORARY TABLE IF EXISTS _seq_rep")
+            cur.execute("""
+                CREATE TEMPORARY TABLE _seq_rep (
+                    seq_id INT PRIMARY KEY,
+                    accession VARCHAR(20),
+                    version VARCHAR(10)
+                ) ENGINE=InnoDB
+            """)
+            cur.execute("""
+                INSERT INTO _seq_rep (seq_id, accession, version)
+                SELECT seq_id, accession, version FROM (
+                    SELECT seq_id, accession, version,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY seq_id ORDER BY version, accession
+                           ) AS rn
+                    FROM proteins
+                    WHERE version <> %s
+                ) t
+                WHERE rn = 1
+            """, (self.version,))
+            conn.commit()
+
+            # Mirror the search's --taxon-ids / --proteome-ids filter so the copy
+            # is scoped identically (also lets you validate on a small subset).
+            filt, fparams = "", []
+            if taxon_ids:
+                filt += " AND np.taxon_id IN (%s)" % ",".join(["%s"] * len(taxon_ids))
+                fparams += list(taxon_ids)
+            if proteome_ids:
+                filt += " AND np.proteome_id IN (%s)" % ",".join(["%s"] * len(proteome_ids))
+                fparams += list(proteome_ids)
+
+            cur.execute(
+                "SELECT DISTINCT proteome_id FROM proteins np WHERE np.version = %s" + filt,
+                tuple([self.version] + fparams),
+            )
+            proteomes = [r[0] for r in cur.fetchall()]
+
+            copy_sql = """
+                INSERT INTO hmm_search_results
+                   (version, accession, taxon_id, proteome_id, protein_name,
+                    hmm_name, full_evalue, full_score, hmm_type,
+                    domain_number, domain_count, domain_evalue, domain_score,
+                    ali_from, ali_to, hmm_from, hmm_to, env_from, env_to, hmm_accession)
+                SELECT np.version, np.accession, np.taxon_id, np.proteome_id, np.name,
+                       h.hmm_name, h.full_evalue, h.full_score, h.hmm_type,
+                       h.domain_number, h.domain_count, h.domain_evalue, h.domain_score,
+                       h.ali_from, h.ali_to, h.hmm_from, h.hmm_to, h.env_from, h.env_to,
+                       h.hmm_accession
+                FROM   proteins np
+                JOIN   _seq_rep r ON r.seq_id = np.seq_id
+                JOIN   hmm_search_results h
+                       ON h.accession = r.accession AND h.version = r.version
+                WHERE  np.version = %s AND np.proteome_id <=> %s
+            """ + filt
+            total = 0
+            for i, pid in enumerate(proteomes, 1):
+                if str(pid) in done:
+                    continue
+                cur.execute(copy_sql, tuple([self.version, pid] + fparams))
+                total += cur.rowcount
+                conn.commit()
+                with open(copy_ckpt, "a") as fh:
+                    fh.write(f"{pid}\n")
+                if i % 100 == 0:
+                    print(f"  REUSE-PRIOR: {i}/{len(proteomes)} proteomes copied "
+                          f"({total} rows so far)…")
+            return total
+        finally:
+            cur.execute("DROP TEMPORARY TABLE IF EXISTS _seq_rep")
+            cur.close()
+            conn.close()
+
 
 # ======================================
 #           MAIN PIPELINE
@@ -351,6 +456,14 @@ def main():
     parser.add_argument("--taxon-ids", nargs="+", type=int, default=None)
     parser.add_argument("--proteome-ids", nargs="+", default=None)
     parser.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE)
+    parser.add_argument(
+        "--reuse-prior",
+        action="store_true",
+        help="Skip HMM search for sequences already present in a prior, "
+             "fully-searched version and COPY their existing results instead "
+             "(much faster version-to-version). VALIDATE on a small --taxon-ids "
+             "subset before trusting it on a full version.",
+    )
 
     args = parser.parse_args()
 
@@ -370,10 +483,18 @@ def main():
 
     # Initialize streamer and importer
     streamer = SequenceStreamer(
-        args.version, args.output_dir, args.taxon_ids, args.proteome_ids
+        args.version, args.output_dir, args.taxon_ids, args.proteome_ids,
+        reuse_prior=args.reuse_prior,
     )
     importer = HMMResultsImporter(args.version, args.output_dir)
     importer.create_results_table()
+
+    if args.reuse_prior:
+        print("REUSE-PRIOR: copying HMM results for sequences already present "
+              "in a prior version…")
+        copied = importer.copy_prior_hits(args.taxon_ids, args.proteome_ids)
+        print(f"REUSE-PRIOR: copied {copied} result rows. HMM search will now "
+              "run only on genuinely new sequences.")
 
     chunk_size = args.chunk_size
     total_processed = 0

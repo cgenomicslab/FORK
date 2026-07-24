@@ -5,6 +5,7 @@ import { view, tree_command, on_tree_change, reset_view, sort, get_tid }
 import { draw_minimap } from "./minimap.js";
 import { update } from "./draw.js";
 import { download_newick } from "./download.js";
+import { api } from "./api.js";
 import { zoom_into_box } from "./zoom.js";
 import { tag_node } from "./tag.js";
 import { collapse_node } from "./collapse.js";
@@ -60,6 +61,38 @@ function add_node_options(box, name, props, node_id) {
     });
     add_button("📥 Download branch as newick", () => download_newick(node_id),
         "Download subtree starting at this node as a newick file.");
+    add_button("🧬 Download sequences as FASTA", async () => {
+        try {
+            const tid = get_tid() + (node_id ? "," + node_id : "");
+            const nwk = await api(`/trees/${tid}/newick`);
+            const leaves = (String(nwk).match(/\d+\.[A-Za-z0-9_.\-]+/g) || []);
+            if (!leaves.length) {
+                Swal.fire({ text: "No sequences found under this branch.",
+                    position: "bottom", showConfirmButton: false, timer: 2000 });
+                return;
+            }
+            const res = await fetch("/api/clade-fasta", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ version: window.__fork_version || "", leaves }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                Swal.fire({ html: data.error || "Could not fetch sequences.", icon: "error" });
+                return;
+            }
+            const blob = new Blob([data.fasta], { type: "text/plain;charset=utf-8" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "clade_sequences.fasta";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(a.href);
+        } catch (ex) {
+            Swal.fire({ html: `When downloading sequences: ${ex.message}`, icon: "error" });
+        }
+    }, "Download the protein sequences of all leaves under this branch as FASTA.");
     if ("taxid" in props) {
         const taxid = props["taxid"];
         add_button("📖 Show in taxonomy browser", () => {
@@ -95,10 +128,6 @@ function add_node_options(box, name, props, node_id) {
         add_button("🪗️ Uncollapse branch",
             () => view.collapsed_ids[node_id].remove(),
             "Show nodes below the current one.");
-    }
-    else {
-        add_button("🗞️ Collapse branch", () => collapse_node(name, node_id),
-            "Do not show nodes below the current one.");
     }
 
     if (view.allow_modifications)
