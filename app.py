@@ -2491,8 +2491,15 @@ def api_accession_lookup():
 @app.route("/api/clade-fasta", methods=["POST"])
 def api_clade_fasta():
     """FASTA for the sequences under a tree clade, from the ETE4 viewer's
-    right-click menu. Leaf names are '{taxid}.{accession}', so the accession is
-    the part after the first dot; sequences are fetched by accession."""
+    right-click menu.
+
+    Two leaf shapes, depending on which viewer the menu was opened in:
+      * protein/phylogenetic trees — leaves are '{taxid}.{accession}', so the
+        accession is the part after the first dot; sequences fetched by accession.
+      * species trees (NCBI topology, e.g. High-Res / Profiling previews) —
+        leaves are bare taxids, so we export *every* protein in those taxa.
+    The client sends whichever it detected as 'leaves' (accession form) or
+    'taxids' (bare-taxid form); if both arrive, accessions win."""
     data = request.json or {}
     ver = (data.get("version") or "").strip() or DEFAULT_VERSION
     leaves = data.get("leaves", []) or []
@@ -2503,11 +2510,23 @@ def api_clade_fasta():
             continue
         accs.append(s.split(".", 1)[1] if "." in s else s)
     accs = list(dict.fromkeys(accs))  # dedupe, keep order
-    if not accs:
-        return jsonify({"error": "No leaf accessions in the selected clade."}), 400
+
+    tids = []
+    for t in data.get("taxids", []) or []:
+        s = str(t).strip()
+        if s.isdigit():
+            tids.append(int(s))
+    tids = list(dict.fromkeys(tids))  # dedupe, keep order
+
+    if not accs and not tids:
+        return jsonify({"error": "No leaves in the selected clade."}), 400
     try:
         config = _get_config()
-        records = uni.fetch_sequences_by_accession(ver, accs, db_config=config)
+        if accs:
+            records = uni.fetch_sequences_by_accession(ver, accs, db_config=config)
+        else:
+            # Species-tree branch: all proteins across the taxa under it.
+            records = uni.fetch_sequences(ver, taxon_ids=tids, db_config=config)
         if not records:
             return jsonify({"error": "No sequences found for this clade in the database."}), 404
         with uni.UniProtRetriever(config) as db:

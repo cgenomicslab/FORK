@@ -1253,7 +1253,7 @@
       } else {
         container.innerHTML = `
               <div class="tree-iframe-wrap" style="height:700px;">
-                <iframe style="width:100%;height:700px;border:none;" src="/ete4/gui?port=${data.port}&tree=tree-1&pfam=${encodeURIComponent(pfam)}"></iframe>
+                <iframe style="width:100%;height:700px;border:none;" src="/ete4/gui?port=${data.port}&tree=tree-1&pfam=${encodeURIComponent(pfam)}&version=${encodeURIComponent((document.getElementById('ver')||{value:''}).value.trim())}"></iframe>
               </div>
               <button class="btn btn-danger btn-sm" style="margin-top:8px;" onclick="stopEte4('${data.ete_key}', '${pfam}')">Stop ETE4</button>
             `;
@@ -1477,7 +1477,7 @@
           </div>
           <div class="tree-iframe-wrap" style="height:720px;">
             <iframe style="width:100%;height:720px;border:none;"
-              src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
+              src="/ete4/gui?port=${data.port}&tree=tree-1&version=${encodeURIComponent((document.getElementById('ver')||{value:''}).value.trim())}"></iframe>
           </div>`;
       showEl('ete-matrix-viewer');
       document.getElementById('ete-matrix-viewer').scrollIntoView({ behavior: 'smooth' });
@@ -1536,7 +1536,7 @@
           </div>
           <div class="tree-iframe-wrap" style="height:720px;">
             <iframe style="width:100%;height:720px;border:none;"
-              src="/ete4/gui?port=${data.port}&tree=tree-1"></iframe>
+              src="/ete4/gui?port=${data.port}&tree=tree-1&version=${encodeURIComponent((document.getElementById('ver')||{value:''}).value.trim())}"></iframe>
           </div>
         `;
       document.getElementById('ete-viewer').scrollIntoView({ behavior: 'smooth' });

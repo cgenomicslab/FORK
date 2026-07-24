@@ -65,8 +65,19 @@ function add_node_options(box, name, props, node_id) {
         try {
             const tid = get_tid() + (node_id ? "," + node_id : "");
             const nwk = await api(`/trees/${tid}/newick`);
-            const leaves = (String(nwk).match(/\d+\.[A-Za-z0-9_.\-]+/g) || []);
-            if (!leaves.length) {
+            // Leaf names are the tokens right after '(' or ',' (internal-node
+            // labels follow ')'); ':' ends a name before its branch length.
+            const names = [...String(nwk).matchAll(/[(,]([^(),:;]+)/g)]
+                .map(m => m[1].trim()).filter(Boolean);
+            // Protein/phylo trees: "taxid.accession". Species trees: bare taxid.
+            const protein_leaves = names.filter(s => /^\d+\.\S+$/.test(s));
+            const taxid_leaves = names.filter(s => /^\d+$/.test(s));
+            let payload;
+            if (protein_leaves.length)
+                payload = { version: window.__fork_version || "", leaves: protein_leaves };
+            else if (taxid_leaves.length)
+                payload = { version: window.__fork_version || "", taxids: taxid_leaves };
+            if (!payload) {
                 Swal.fire({ text: "No sequences found under this branch.",
                     position: "bottom", showConfirmButton: false, timer: 2000 });
                 return;
@@ -74,7 +85,7 @@ function add_node_options(box, name, props, node_id) {
             const res = await fetch("/api/clade-fasta", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ version: window.__fork_version || "", leaves }),
+                body: JSON.stringify(payload),
             });
             const data = await res.json();
             if (!res.ok || data.error) {
@@ -121,7 +132,12 @@ function add_node_options(box, name, props, node_id) {
                 { type: "fork-tag-branch", pfam: window.__fork_pfam, path: String(node_id) },
                 window.location.origin
             );
-        }, "Add this branch as a subclade in the profiling Node-path list.");
+            // Highlight the chosen subclade on the tree so it's clear which
+            // branches were picked. Reuses ETE4's own tag mechanism, so the
+            // highlight survives redraws and is removable from the selections
+            // panel; all picks share one "profiling" tag (one colour).
+            tag_node(node_id, "profiling");
+        }, "Add this branch as a subclade in the profiling Node-path list (and highlight it).");
     }
 
     if (view.collapsed_ids[node_id]) {
