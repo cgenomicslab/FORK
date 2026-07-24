@@ -330,15 +330,18 @@ class UniProtRetriever:
             JOIN   sequences s ON p.seq_id = s.seq_id
             WHERE  h.version = %s
               {evalue_clause}
-              AND  (h.hmm_name = %s OR h.hmm_accession LIKE %s)
+              AND  (h.hmm_name = %s OR h.hmm_accession = %s OR h.hmm_accession LIKE %s)
         """
 
-        # We use LIKE %s with a wildcard (%) so if the user searches for "PF00046",
-        # it successfully matches "PF00046.36" in your database.
+        # Match an exact name, an exact accession, or a base accession + its
+        # version suffix: "PF00046" → "PF00046.36" via LIKE "PF00046.%". The
+        # ".%" (dot then wildcard) is deliberate — a bare "PF00046%" would also
+        # match "PF000460", and a partial like "PF000" would match every
+        # "PF000..*" accession, pulling in unrelated profiles.
         params = [version]
         if evalue_cutoff is not None:
             params.append(evalue_cutoff)
-        params += [hmm_query, f"{hmm_query}%"]
+        params += [hmm_query, hmm_query, f"{hmm_query}.%"]
 
         if taxon_ids is not None:
             if isinstance(taxon_ids, (list, tuple)):
@@ -513,7 +516,8 @@ class UniProtRetriever:
             return []
 
         pfam_conditions = " OR ".join(
-            ["(h.hmm_name = %s OR h.hmm_accession LIKE %s)"] * len(pfam_queries)
+            ["(h.hmm_name = %s OR h.hmm_accession = %s OR h.hmm_accession LIKE %s)"]
+            * len(pfam_queries)
         )
         evalue_clause = "AND h.full_evalue <= %s" if evalue_cutoff is not None else ""
 
@@ -536,7 +540,7 @@ class UniProtRetriever:
         if evalue_cutoff is not None:
             params.append(evalue_cutoff)
         for q in pfam_queries:
-            params.extend([q, f"{q}%"])
+            params.extend([q, q, f"{q}.%"])
 
         if taxon_ids is not None:
             if isinstance(taxon_ids, (int, str)):
@@ -624,7 +628,8 @@ class UniProtRetriever:
 
         taxon_ids = sorted({int(t) for t in taxon_ids})
         pfam_conditions = " OR ".join(
-            ["(h.hmm_name = %s OR h.hmm_accession LIKE %s)"] * len(pfam_queries)
+            ["(h.hmm_name = %s OR h.hmm_accession = %s OR h.hmm_accession LIKE %s)"]
+            * len(pfam_queries)
         )
         evalue_clause = "AND h.full_evalue <= %s" if evalue_cutoff is not None else ""
 
@@ -639,7 +644,7 @@ class UniProtRetriever:
                 if evalue_cutoff is not None:
                     params.append(evalue_cutoff)
                 for q in pfam_queries:
-                    params.extend([q, f"{q}%"])
+                    params.extend([q, q, f"{q}.%"])
                 params.extend(chunk)
 
                 go_query = f"""
@@ -862,7 +867,7 @@ class UniProtRetriever:
             JOIN   proteins p ON h.accession = p.accession AND h.version = p.version
             WHERE  h.version = %s
               {evalue_clause}
-              AND  (h.hmm_name = %s OR h.hmm_accession LIKE %s)
+              AND  (h.hmm_name = %s OR h.hmm_accession = %s OR h.hmm_accession LIKE %s)
               AND  h.taxon_id = %s
             ORDER BY h.accession
         """
@@ -870,7 +875,7 @@ class UniProtRetriever:
         params = [version]
         if evalue_cutoff is not None:
             params.append(evalue_cutoff)
-        params.extend([pfam_query, f"{pfam_query}%", int(taxon_id)])
+        params.extend([pfam_query, pfam_query, f"{pfam_query}.%", int(taxon_id)])
 
         try:
             self.cursor.execute(query, tuple(params))

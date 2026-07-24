@@ -8,10 +8,17 @@ import signal
 import threading
 import subprocess
 import tempfile
+import re
 from pathlib import Path
 from ete4 import NCBITaxa
 
 _ncbi = NCBITaxa()
+
+# A Pfam accession is "PF" + exactly five digits, optionally ".<version>".
+_PFAM_ACC_RE = re.compile(r"^PF\d{5}(\.\d+)?$", re.IGNORECASE)
+# "Looks like an accession attempt": PF followed by digits (any count). Used to
+# tell a malformed accession (PF000) apart from a profile *name* (7TM_1).
+_PFAM_ACC_ATTEMPT_RE = re.compile(r"^PF\d+$", re.IGNORECASE)
 
 # Load .env from the same directory as this script, before any DB imports
 from dotenv import load_dotenv
@@ -848,6 +855,30 @@ def api_presence_matrix():
 
     if not pfam_queries:
         return jsonify({"error": "At least one Pfam query is required."}), 400
+
+    # Reject malformed Pfam accessions up front. A real accession is "PF" + exactly
+    # five digits, optionally a ".<version>" suffix (e.g. PF00046 or PF00046.36).
+    # Anything that starts "PF<digits>" but isn't a complete accession — e.g. the
+    # partial "PF000" — is a typo, not a valid profile, so we error instead of
+    # letting it match (or, previously, over-match) in the database.
+    bad_acc = [
+        q for q in pfam_queries
+        if _PFAM_ACC_ATTEMPT_RE.match(q.strip())
+        and not _PFAM_ACC_RE.match(q.strip())
+    ]
+    if bad_acc:
+        return (
+            jsonify(
+                {
+                    "error": "Invalid Pfam accession: "
+                    + ", ".join(bad_acc)
+                    + ". A Pfam accession is 'PF' followed by exactly five digits "
+                    "(e.g. PF00046), optionally with a version (PF00046.36). "
+                    "For a profile name, type it in full (e.g. 7TM_1)."
+                }
+            ),
+            400,
+        )
 
     try:
         import pandas as pd
